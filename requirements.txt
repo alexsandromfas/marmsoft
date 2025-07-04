@@ -1,0 +1,6 @@
+# Bibliotecas principais utilizadas no projeto
+customtkinter
+pygame
+bleak
+numpy
+matplotlib

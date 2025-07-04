@@ -1,0 +1,2517 @@
+
+
+
+
+
+
+
+# Código do arquivo: C:/Users/Alex Martins/Desktop/FEI/Mestrado FEI/Pesquisa/Software, Firmware/Software Marms/Software_V2.6 - FSR Sensors\main.py
+
+# main.py
+
+import customtkinter as ctk
+import threading
+import time
+from Modules.sensor_data import SensorData
+from Modules.gui_manager import GUIManager
+
+# Configurações BLE
+CHARACTERISTIC_UUID = "abcdef01-1234-5678-1234-56789abcdef0"
+
+sensors = {}
+
+# Criar 8 Flex Sensors
+for i in range(1, 9):
+    sensors[f'flex{i}'] = SensorData()
+
+# Criar 4 FSR Sensors
+for i in range(1, 5):
+    sensors[f'fsr{i}'] = SensorData()
+
+# Carregar calibrações flex
+for i in range(1, 9):
+    sensors[f'flex{i}'].load_calibration_from_file(f'calibration_flex{i}.csv')
+
+# Carregar calibrações fsr (se existir)
+for i in range(1, 5):
+    sensors[f'fsr{i}'].load_calibration_from_file(f'calibration_fsr{i}.csv')
+
+latest_readings = {'goniometer_angle': 0.0}
+
+# Flex readings
+for i in range(1, 9):
+    latest_readings[f'flex{i}_voltage'] = 0.0
+    latest_readings[f'flex{i}_angle'] = 0.0
+
+# FSR readings
+for i in range(1, 5):
+    latest_readings[f'fsr{i}_voltage'] = 0.0
+    latest_readings[f'fsr{i}_force'] = 0.0  # novo campo para força
+
+ctk.set_appearance_mode("dark")
+ctk.set_default_color_theme("blue")
+
+root = ctk.CTk()
+root.title("MarmSoft")
+root.state("zoomed")
+
+gui_manager = GUIManager(
+    root=root,
+    sensors=sensors,
+    latest_readings=latest_readings
+)
+
+root.mainloop()
+
+
+
+
+
+
+
+
+
+# Código do arquivo: C:/Users/Alex Martins/Desktop/FEI/Mestrado FEI/Pesquisa/Software, Firmware/Software Marms/Software_V2.6 - FSR Sensors\FlyBird\main_fb.py
+
+# main_fb.py
+
+from FlyBird.modules.game import Game
+
+def main_fb(sensor_data_provider=None):
+    game = Game(sensor_data_provider=sensor_data_provider)
+    while game.running:
+        game.screens.show_start_screen()
+        if not game.running:
+            break
+        game.screens.get_player_name()
+        if not game.running:
+            break
+        game.screens.get_finger_choice()
+        if not game.running:
+            break
+
+        while game.running:
+            game.new()
+            game.run()
+            if game.game_over:
+                game.save_results()
+                game.screens.show_go_screen()
+                
+                if not game.running:
+                    break  # Sai do loop se o jogador escolher sair
+    game.quit_game()
+
+if __name__ == '__main__':
+    main_fb()
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Código do arquivo: C:/Users/Alex Martins/Desktop/FEI/Mestrado FEI/Pesquisa/Software, Firmware/Software Marms/Software_V2.6 - FSR Sensors\FlyBird\__init__.py
+
+
+
+
+
+
+
+
+
+
+# Código do arquivo: C:/Users/Alex Martins/Desktop/FEI/Mestrado FEI/Pesquisa/Software, Firmware/Software Marms/Software_V2.6 - FSR Sensors\FlyBird\modules\flex_sensor.py
+
+# modules/flex_sensor.py
+
+def read_flex_sensor():
+    # Placeholder function to read flex sensor data
+    # In the future, this function will interface with the hardware
+    # For now, it returns None or simulated data
+    return None
+
+
+
+
+
+
+
+
+
+# Código do arquivo: C:/Users/Alex Martins/Desktop/FEI/Mestrado FEI/Pesquisa/Software, Firmware/Software Marms/Software_V2.6 - FSR Sensors\FlyBird\modules\game.py
+
+# modules/game.py
+
+import pygame
+import random
+import csv
+import os
+from FlyBird.modules.sprites import Bird, Wood, Cloud
+from FlyBird.modules.settings import *
+from FlyBird.modules.utils import *
+from FlyBird.modules.input_handler import get_input
+from FlyBird.modules.screens import Screens
+
+class Game:
+    def __init__(self,sensor_data_provider=None):
+        pygame.init()
+        self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
+        pygame.display.set_caption("FlyBird")
+        self.clock = pygame.time.Clock()
+        self.running = True
+        self.game_over = False
+        self.font = pygame.font.Font(None, 36)
+        self.sensor_data_provider = sensor_data_provider  # Mova esta linha antes de load_data()
+        self.load_data() 
+        self.player_name = ""
+        self.selected_finger = ""
+        self.screens = Screens(self)
+        self.started = False  # Use this flag if necessary
+        print("Game initialized.")
+
+
+
+    def load_data(self):
+        # Load images
+        self.background = pygame.image.load(os.path.join(ASSETS_DIR, "Background", "background.png")).convert()
+        self.cloud_images = load_images_from_folder(NUVENS_DIR)
+        self.wood_images = load_images_from_folder(WOOD_DIR)
+        bird_frames = load_images_from_folder(BIRD_DIR, scale_factor=BIRD_SCALE, remove_bg=True, base_color=(0, 255, 0))
+        self.bird = Bird(bird_frames)
+        self.bird = Bird(bird_frames, sensor_data_provider=self.sensor_data_provider)
+
+
+        # Load obstacles from CSV
+        self.woods = pygame.sprite.Group()
+        obstacles = load_obstacles_from_csv()
+        for obstacle_data in obstacles:
+            wood = Wood(obstacle_data["image"], obstacle_data["x"], obstacle_data["y"], obstacle_data["bottom"])
+            self.woods.add(wood)
+
+        # Generate initial clouds
+        self.clouds = pygame.sprite.Group()
+        for cloud_data in generate_clouds(self.cloud_images):
+            cloud = Cloud(cloud_data["image"], cloud_data["x"], cloud_data["y"], cloud_data["speed"])
+            self.clouds.add(cloud)
+
+
+    def new(self):
+        # Set up a new game
+        self.reset()  # Reset game variables
+        print("New game started.")
+
+
+    def run(self):
+        # Game Loop
+        while self.running and not self.game_over:
+            self.clock.tick(FPS)
+            self.events()
+            self.update()
+            self.draw()
+
+    def events(self):
+        # Handle events
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                self.running = False
+
+    def update(self):
+        # Update game
+        keys_pressed = pygame.key.get_pressed()
+        self.bird.update(keys_pressed)
+        self.bird.check_invincibility()
+        self.clouds.update()
+        self.woods.update()
+
+        # Check collisions
+        if not self.bird.is_invincible:
+            bird_mask = pygame.mask.from_surface(self.bird.image)
+            for wood in self.woods:
+                wood_mask = pygame.mask.from_surface(wood.image)
+                offset = (int(wood.rect.x - self.bird.rect.x), int(wood.rect.y - self.bird.rect.y))
+                if bird_mask.overlap(wood_mask, offset):
+                    print("Collision!")
+                    self.bird.handle_collision()
+                    if self.bird.lives <= 0:
+                        print("Game Over!")
+                        print(f"Total obstacles passed: {self.bird.obstacles_passed}")
+                        self.game_over = True
+
+        # Check if bird has passed any woods
+        for wood in self.woods:
+            if not wood.passed and wood.rect.right < self.bird.rect.left:
+                wood.passed = True
+                self.bird.pass_obstacle()
+
+
+
+    def draw(self):
+        # Draw everything
+        self.screen.blit(self.background, (0, 0))
+        self.clouds.draw(self.screen)
+        self.bird.draw(self.screen)
+        self.woods.draw(self.screen)
+
+        # Draw lives
+        lives_text = self.font.render(f"Vidas: {self.bird.lives}", True, WHITE)
+        self.screen.blit(lives_text, (WIDTH - 150, 20))
+
+        pygame.display.flip()
+
+
+    
+    
+    def get_player_info(self, new_player=True):
+        # Get player's name and finger choice
+        self.screen.fill(BLACK)
+        font_small = pygame.font.Font(None, 36)
+        name_prompt = font_small.render("Digite seu nome:", True, WHITE)
+        finger_prompt = font_small.render("Escolha o dedo para exercitar:", True, WHITE)
+
+        input_box = pygame.Rect(WIDTH // 2 - 100, HEIGHT // 2 - 20, 200, 40)
+        name_text = self.player_name if not new_player else ''
+        active_name = new_player
+        cursor_visible = True
+        cursor_timer = 0
+        cursor_interval = 500  # milliseconds
+
+        # Define finger buttons
+        fingers = ['Polegar', 'Indicador', 'Médio', 'Anelar', 'Mínimo']
+        finger_buttons = []
+        button_width = 150
+        button_height = 40
+        button_margin = 10
+        total_height = len(fingers) * (button_height + button_margin) - button_margin
+        start_y = HEIGHT // 2 - total_height // 2 + 100
+
+        for i, finger in enumerate(fingers):
+            rect = pygame.Rect(WIDTH // 2 - button_width // 2, start_y + i * (button_height + button_margin), button_width, button_height)
+            finger_buttons.append((rect, finger))
+
+        # Next button
+        next_button = pygame.Rect(WIDTH // 2 - 50, input_box.bottom + 20, 100, 40)
+        next_button_text = font_small.render("Próximo", True, BLACK)
+
+        while True:
+            current_time = pygame.time.get_ticks()
+            if current_time - cursor_timer > cursor_interval:
+                cursor_visible = not cursor_visible
+                cursor_timer = current_time
+
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    self.running = False
+                    return
+                if event.type == pygame.KEYDOWN and active_name:
+                    if event.key == pygame.K_RETURN:
+                        if name_text.strip() != '':
+                            active_name = False
+                    elif event.key == pygame.K_BACKSPACE:
+                        name_text = name_text[:-1]
+                    else:
+                        name_text += event.unicode
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    mouse_pos = event.pos
+                    if active_name:
+                        if input_box.collidepoint(mouse_pos):
+                            active_name = True
+                        elif next_button.collidepoint(mouse_pos):
+                            if name_text.strip() != '':
+                                active_name = False
+                    elif not active_name:
+                        for rect, finger in finger_buttons:
+                            if rect.collidepoint(mouse_pos):
+                                self.player_name = name_text
+                                self.selected_finger = finger.lower()
+                                return
+
+            self.screen.fill(BLACK)
+            # Draw name prompt and input box
+            self.screen.blit(name_prompt, (WIDTH // 2 - name_prompt.get_width() // 2, HEIGHT // 2 - 80))
+            pygame.draw.rect(self.screen, WHITE, input_box, 2)
+            name_surface = font_small.render(name_text, True, WHITE)
+            self.screen.blit(name_surface, (input_box.x + 5, input_box.y + 5))
+
+            # Blinking cursor
+            if active_name and cursor_visible:
+                cursor_rect = pygame.Rect(input_box.x + 5 + name_surface.get_width(), input_box.y + 5, 2, name_surface.get_height())
+                pygame.draw.rect(self.screen, WHITE, cursor_rect)
+
+            # Draw Next button
+            if active_name:
+                pygame.draw.rect(self.screen, WHITE, next_button)
+                text_rect = next_button_text.get_rect(center=next_button.center)
+                self.screen.blit(next_button_text, text_rect)
+            else:
+                # Draw finger prompt
+                self.screen.blit(finger_prompt, (WIDTH // 2 - finger_prompt.get_width() // 2, HEIGHT // 2 - 150))
+                # Draw finger buttons
+                for rect, finger in finger_buttons:
+                    pygame.draw.rect(self.screen, WHITE, rect)
+                    finger_text = font_small.render(finger, True, BLACK)
+                    text_rect = finger_text.get_rect(center=rect.center)
+                    self.screen.blit(finger_text, text_rect)
+
+            pygame.display.flip()
+            self.clock.tick(30)
+
+
+    def reset(self):
+        self.game_over = False
+        self.bird.lives = INITIAL_LIVES
+        self.bird.rect.center = (WIDTH // 2 - 50, HEIGHT // 2)
+        self.bird.velocity = 0
+        self.bird.amplitudes.clear()
+        self.bird.obstacles_passed = 0
+
+        # Reload clouds
+        self.clouds.empty()
+        for cloud_data in generate_clouds(self.cloud_images):
+            cloud = Cloud(cloud_data["image"], cloud_data["x"], cloud_data["y"], cloud_data["speed"])
+            self.clouds.add(cloud)
+
+        # Reload woods from CSV
+        self.woods.empty()
+        obstacles = load_obstacles_from_csv()
+        for obstacle_data in obstacles:
+            wood = Wood(obstacle_data["image"], obstacle_data["x"], obstacle_data["y"], obstacle_data["bottom"])
+            self.woods.add(wood)
+
+    
+    def save_results(self):
+        # Save player's performance to CSV
+        if not os.path.exists(DATA_DIR):
+            os.makedirs(DATA_DIR)
+        file_exists = os.path.isfile(RESULTS_FILE)
+        with open(RESULTS_FILE, 'a', newline='') as csvfile:
+            fieldnames = ['Nome', 'Dedo', 'Obstáculos Ultrapassados', 'Amplitude Falange 1', 'Amplitude Falange 2']
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            if not file_exists:
+                writer.writeheader()
+            # Compute total amplitudes
+            if self.bird.amplitudes:
+                total_phalange1 = max(a[0] for a in self.bird.amplitudes) - min(a[0] for a in self.bird.amplitudes)
+                total_phalange2 = max(a[1] for a in self.bird.amplitudes) - min(a[1] for a in self.bird.amplitudes)
+            else:
+                total_phalange1 = total_phalange2 = 0
+            writer.writerow({
+                'Nome': self.player_name,
+                'Dedo': self.selected_finger,
+                'Obstáculos Ultrapassados': self.bird.obstacles_passed,
+                'Amplitude Falange 1': f"{total_phalange1:.2f}",
+                'Amplitude Falange 2': f"{total_phalange2:.2f}"
+            })
+        # Confirmation message in terminal
+        print("Resultados Salvos!")
+
+    def play_again(self):
+        self.reset()
+        self.screens.get_finger_choice()
+        if self.running:
+            self.game_over = False  # Ensure game_over is reset
+
+
+    def change_patient(self):
+        self.reset()
+        self.player_name = ''
+        self.selected_finger = ''
+        self.screens.get_player_name()
+        if self.running:
+            self.screens.get_finger_choice()
+        if self.running:
+            self.game_over = False  # Ensure game_over is reset
+
+
+
+
+    def quit_game(self):
+        self.running = False
+
+
+
+
+
+
+
+
+
+# Código do arquivo: C:/Users/Alex Martins/Desktop/FEI/Mestrado FEI/Pesquisa/Software, Firmware/Software Marms/Software_V2.6 - FSR Sensors\FlyBird\modules\input_handler.py
+
+# modules/input_handler.py
+
+def get_input():
+    # Placeholder for future flex sensor input
+    # For now, we use keyboard input in the game loop directly
+    pass
+
+
+
+
+
+
+
+
+
+# Código do arquivo: C:/Users/Alex Martins/Desktop/FEI/Mestrado FEI/Pesquisa/Software, Firmware/Software Marms/Software_V2.6 - FSR Sensors\FlyBird\modules\screens.py
+
+# modules/screens.py
+
+import pygame
+from FlyBird.modules.settings import *
+from FlyBird.modules.utils import *
+from FlyBird.modules.game import *
+
+class Screens:
+    def __init__(self, game):
+        self.game = game
+        self.screen = game.screen
+        self.clock = game.clock
+        self.font = game.font
+
+    def show_start_screen(self):
+        self.screen.fill(BLACK)
+        font_large = pygame.font.Font(None, 72)
+        title_text = font_large.render("FlyBird", True, WHITE)
+        self.screen.blit(title_text, (WIDTH // 2 - title_text.get_width() // 2, HEIGHT // 3))
+
+        font_small = pygame.font.Font(None, 36)
+        instruction_text = font_small.render("Pressione ENTER para iniciar", True, WHITE)
+        self.screen.blit(instruction_text, (WIDTH // 2 - instruction_text.get_width() // 2, HEIGHT // 2))
+
+        pygame.display.flip()
+
+        waiting = True
+        while waiting:
+            self.clock.tick(FPS)
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    waiting = False
+                    self.game.running = False
+                if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_RETURN:
+                        waiting = False
+
+
+
+    def show_go_screen(self):
+        # Calculate score and amplitudes
+        obstacles_passed = self.game.bird.obstacles_passed
+        if self.game.bird.amplitudes:
+            total_phalange1 = max(a[0] for a in self.game.bird.amplitudes) - min(a[0] for a in self.game.bird.amplitudes)
+            total_phalange2 = max(a[1] for a in self.game.bird.amplitudes) - min(a[1] for a in self.game.bird.amplitudes)
+        else:
+            total_phalange1 = total_phalange2 = 0
+
+        # Game Over screen
+        self.screen.fill(BLACK)
+        self.game.save_results
+        font_large = pygame.font.Font(None, 72)
+        game_over_text = font_large.render("GAME OVER", True, WHITE)
+        self.screen.blit(game_over_text, (WIDTH // 2 - game_over_text.get_width() // 2, HEIGHT // 6))
+
+        font_small = pygame.font.Font(None, 36)
+        # Display score
+        score_text = font_small.render(f"Obstáculos ultrapassados: {obstacles_passed}", True, WHITE)
+        amplitude_text = font_small.render(
+            f"Amplitude Falange 1: {total_phalange1:.2f}°   Amplitude Falange 2: {total_phalange2:.2f}°", True, WHITE)
+        self.screen.blit(score_text, (WIDTH // 2 - score_text.get_width() // 2, HEIGHT // 6 + 80))
+        self.screen.blit(amplitude_text, (WIDTH // 2 - amplitude_text.get_width() // 2, HEIGHT // 6 + 120))
+
+        # Buttons
+        buttons = []
+        button_texts = ["Jogar Novamente", "Trocar Paciente", "Sair"]
+        button_actions = [self.game.play_again, self.game.change_patient, self.game.quit_game]
+        button_width = 200
+        button_height = 50
+        button_margin = 20
+        total_height = len(button_texts) * (button_height + button_margin) - button_margin
+        start_y = HEIGHT // 2
+
+        for i, text in enumerate(button_texts):
+            rect = pygame.Rect(WIDTH // 2 - button_width // 2, start_y + i * (button_height + button_margin), button_width, button_height)
+            buttons.append((rect, text, button_actions[i]))
+
+        waiting = True
+        while waiting:
+            self.clock.tick(FPS)
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    waiting = False
+                    self.game.running = False
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    mouse_pos = event.pos
+                    for rect, text, action in buttons:
+                        if rect.collidepoint(mouse_pos):
+                            action()
+                            waiting = False
+                            break
+
+            # Redraw the screen elements
+            self.screen.fill(BLACK)
+            self.screen.blit(game_over_text, (WIDTH // 2 - game_over_text.get_width() // 2, HEIGHT // 6))
+            self.screen.blit(score_text, (WIDTH // 2 - score_text.get_width() // 2, HEIGHT // 6 + 80))
+            self.screen.blit(amplitude_text, (WIDTH // 2 - amplitude_text.get_width() // 2, HEIGHT // 6 + 120))
+
+            for rect, text, _ in buttons:
+                pygame.draw.rect(self.screen, WHITE, rect)
+                button_text = font_small.render(text, True, BLACK)
+                text_rect = button_text.get_rect(center=rect.center)
+                self.screen.blit(button_text, text_rect)
+
+            pygame.display.flip()
+
+    
+    def get_player_name(self):
+        font_small = pygame.font.Font(None, 36)
+        name_prompt = font_small.render("Digite seu nome:", True, WHITE)
+        input_box = pygame.Rect(WIDTH // 2 - 150, HEIGHT // 2 - 20, 300, 40)
+        name_text = ''
+        active = True
+        cursor_visible = True
+        cursor_timer = 0
+        cursor_interval = 500  # milliseconds
+
+        # Next button
+        next_button = pygame.Rect(WIDTH // 2 - 50, input_box.bottom + 20, 100, 40)
+        next_button_text = font_small.render("Próximo", True, BLACK)
+
+        while active:
+            current_time = pygame.time.get_ticks()
+            if current_time - cursor_timer > cursor_interval:
+                cursor_visible = not cursor_visible
+                cursor_timer = current_time
+
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    active = False
+                    self.game.running = False
+                    return
+                if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_RETURN:
+                        if name_text.strip() != '':
+                            active = False
+                            self.game.player_name = name_text
+                            return
+                    elif event.key == pygame.K_BACKSPACE:
+                        name_text = name_text[:-1]
+                    else:
+                        name_text += event.unicode
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    mouse_pos = event.pos
+                    if next_button.collidepoint(mouse_pos):
+                        if name_text.strip() != '':
+                            active = False
+                            self.game.player_name = name_text
+                            return
+
+            self.screen.fill(BLACK)
+            self.screen.blit(name_prompt, (WIDTH // 2 - name_prompt.get_width() // 2, HEIGHT // 2 - 80))
+            pygame.draw.rect(self.screen, WHITE, input_box, 2)
+            name_surface = font_small.render(name_text, True, WHITE)
+            self.screen.blit(name_surface, (input_box.x + 5, input_box.y + 5))
+
+            # Blinking cursor
+            if cursor_visible:
+                cursor_rect = pygame.Rect(input_box.x + 5 + name_surface.get_width(), input_box.y + 5, 2, name_surface.get_height())
+                pygame.draw.rect(self.screen, WHITE, cursor_rect)
+
+            # Draw Next button
+            pygame.draw.rect(self.screen, WHITE, next_button)
+            text_rect = next_button_text.get_rect(center=next_button.center)
+            self.screen.blit(next_button_text, text_rect)
+
+            pygame.display.flip()
+            self.clock.tick(30)
+
+
+    def get_finger_choice(self):
+        font_small = pygame.font.Font(None, 36)
+        finger_prompt = font_small.render("Escolha o dedo para exercitar:", True, WHITE)
+
+        # Define finger buttons
+        fingers = ['Polegar', 'Indicador', 'Médio', 'Anelar', 'Mínimo']
+        finger_buttons = []
+        button_width = 200
+        button_height = 50
+        button_margin = 10
+        total_height = len(fingers) * (button_height + button_margin) - button_margin
+        start_y = HEIGHT // 2 - total_height // 2 + 50
+
+        for i, finger in enumerate(fingers):
+            rect = pygame.Rect(WIDTH // 2 - button_width // 2, start_y + i * (button_height + button_margin), button_width, button_height)
+            finger_buttons.append((rect, finger))
+
+        active = True
+        while active:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    active = False
+                    self.game.running = False
+                    return
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    mouse_pos = event.pos
+                    for rect, finger in finger_buttons:
+                        if rect.collidepoint(mouse_pos):
+                            self.game.selected_finger = finger.lower()
+                            active = False
+                            return
+
+            self.screen.fill(BLACK)
+            # Draw finger prompt
+            self.screen.blit(finger_prompt, (WIDTH // 2 - finger_prompt.get_width() // 2, HEIGHT // 6))
+
+            # Draw finger buttons
+            for rect, finger in finger_buttons:
+                pygame.draw.rect(self.screen, WHITE, rect)
+                finger_text = font_small.render(finger, True, BLACK)
+                text_rect = finger_text.get_rect(center=rect.center)
+                self.screen.blit(finger_text, text_rect)
+
+            pygame.display.flip()
+            self.clock.tick(30)
+
+
+
+
+
+
+
+
+
+
+# Código do arquivo: C:/Users/Alex Martins/Desktop/FEI/Mestrado FEI/Pesquisa/Software, Firmware/Software Marms/Software_V2.6 - FSR Sensors\FlyBird\modules\settings.py
+
+# modules/settings.py
+
+import os
+
+# Screen settings
+WIDTH, HEIGHT = 960, 640
+FPS = 60
+
+# Colors
+WHITE = (255, 255, 255)
+BLACK = (0, 0, 0)
+
+# Paths
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ASSETS_DIR = os.path.join(BASE_DIR, "assets")
+NUVENS_DIR = os.path.join(ASSETS_DIR, "Nuvens")
+BIRD_DIR = os.path.join(ASSETS_DIR, "Bird")
+WOOD_DIR = os.path.join(ASSETS_DIR, "Woods")
+DATA_DIR = os.path.join(BASE_DIR, "data")
+RESULTS_FILE = os.path.join(DATA_DIR, "results.csv")
+
+# Bird settings
+BIRD_SCALE = 0.15  # Scale to reduce bird size
+BIRD_FRAME_RATE = 50
+BIRD_ACCELERATION = 0.3
+BIRD_MAX_SPEED = 5
+BIRD_FRICTION = 0.1
+
+# Invincibility settings
+INVINCIBLE_DURATION = 3000  # milliseconds
+BLINK_INTERVAL = 300  # milliseconds
+
+# Lives
+INITIAL_LIVES = 2
+
+# Flex Sensor settings
+FLEX_SENSOR_MIN = 0     # Minimum angle (degrees)
+FLEX_SENSOR_MAX = 90    # Maximum angle (degrees)
+FLEX_SENSOR_CENTER = 45 # Center position
+# modules/settings.py
+
+# Sensor angle ranges for bird movement
+SENSOR_ANGLE_MIN = 280  # Minimum angle from sensor to start moving the bird
+SENSOR_ANGLE_MAX = 170  # Maximum angle from sensor
+
+# Other settings
+TOLERANCE = 20  # Tolerance for background removal
+
+
+
+
+
+
+
+
+
+# Código do arquivo: C:/Users/Alex Martins/Desktop/FEI/Mestrado FEI/Pesquisa/Software, Firmware/Software Marms/Software_V2.6 - FSR Sensors\FlyBird\modules\sprites.py
+
+# modules/sprites.py
+
+import pygame
+import random
+from FlyBird.modules.settings import *
+from FlyBird.modules.utils import remove_background_with_tolerance
+
+class Bird(pygame.sprite.Sprite):
+    def __init__(self, frames, sensor_data_provider=None):
+        super().__init__()
+        self.frames = frames
+        self.index = 0
+        self.image = self.frames[self.index]
+        self.rect = self.image.get_rect()
+        self.rect.center = (WIDTH // 2 - 50, HEIGHT // 2)
+        self.velocity = 0
+        self.acceleration = BIRD_ACCELERATION
+        self.max_speed = BIRD_MAX_SPEED
+        self.friction = BIRD_FRICTION
+        self.last_update = pygame.time.get_ticks()
+        self.frame_rate = BIRD_FRAME_RATE
+        self.is_invincible = False
+        self.invincible_start_time = 0
+        self.lives = INITIAL_LIVES
+        self.amplitudes = []  # Store tuples of (phalange1, phalange2)
+        self.obstacles_passed = 0  # New attribute to track obstacles passed
+        self.sensor_data_provider = sensor_data_provider
+
+        # Simulate amplitudes based on bird's vertical position
+        position_ratio = self.rect.y / (HEIGHT - self.image.get_height())
+        angle = position_ratio * (FLEX_SENSOR_MAX - FLEX_SENSOR_MIN) + FLEX_SENSOR_MIN
+        self.amplitudes.append((angle, angle))
+    def update(self, keys_pressed):
+        current_time = pygame.time.get_ticks()
+        if current_time - self.last_update > self.frame_rate:
+            self.index = (self.index + 1) % len(self.frames)
+            self.image = self.frames[self.index]
+            self.last_update = current_time
+
+        # Update amplitudes (simulate or use actual sensor data)
+        if self.sensor_data_provider is not None:
+            current_angle = self.sensor_data_provider()
+            # Ajuste para lidar com valores None
+            if current_angle is None:
+                current_angle = SENSOR_ANGLE_MIN  # Ou algum valor padrão
+            # Mapear o ângulo do sensor para a posição vertical na tela
+            # position_ratio = (current_angle - SENSOR_ANGLE_MIN) / (SENSOR_ANGLE_MAX - SENSOR_ANGLE_MIN)
+            # position_ratio = max(0, min(1, position_ratio))  # Garantir que esteja entre 0 e 1
+
+            # position_ratio = (current_angle - SENSOR_ANGLE_MIN) / (SENSOR_ANGLE_MAX - SENSOR_ANGLE_MIN)
+            # position_ratio = 1 - position_ratio  # Inverter para que o ângulo mínimo seja o topo
+            
+            position_ratio = (SENSOR_ANGLE_MAX - current_angle) / (SENSOR_ANGLE_MAX - SENSOR_ANGLE_MIN)
+            position_ratio = max(0, min(1, position_ratio))  # Garantir que esteja entre 0 e 1
+
+            target_y = position_ratio * (800 - self.image.get_height())
+
+            # Mover suavemente em direção ao target_y
+            smoothing_factor = 0.1  # Ajuste este valor conforme necessário (entre 0 e 1)
+            self.rect.y += (target_y - self.rect.y) * smoothing_factor
+
+            # Garantir que o pássaro permaneça dentro dos limites da tela
+            self.rect.y = max(-10, min(self.rect.y, 800 - self.image.get_height()))
+        else:
+            # Controle via teclado (caso o sensor não esteja disponível)
+            if keys_pressed[pygame.K_UP]:
+                self.rect.y -= self.max_speed
+            elif keys_pressed[pygame.K_DOWN]:
+                self.rect.y += self.max_speed
+            # Garantir que o pássaro permaneça dentro dos limites da tela
+            self.rect.y = max(0, min(self.rect.y, HEIGHT - self.image.get_height()))
+
+        # Atualizar amplitudes com base na nova posição
+        position_ratio = self.rect.y / (HEIGHT - self.image.get_height())
+        angle = position_ratio * (FLEX_SENSOR_MAX - FLEX_SENSOR_MIN) + FLEX_SENSOR_MIN
+        self.amplitudes.append((angle, angle))
+        
+    # def update(self, keys_pressed):
+    #     current_time = pygame.time.get_ticks()
+    #     if current_time - self.last_update > self.frame_rate:
+    #         self.index = (self.index + 1) % len(self.frames)
+    #         self.image = self.frames[self.index]
+    #         self.last_update = current_time
+
+    #     # Update amplitudes (simulate or use actual sensor data)
+    #     if self.sensor_data_provider is not None:
+    #         current_angle = self.sensor_data_provider()
+    #         if SENSOR_ANGLE_MIN <= current_angle <= SENSOR_ANGLE_MAX:
+    #             position_ratio = (current_angle - SENSOR_ANGLE_MIN) / (SENSOR_ANGLE_MAX - SENSOR_ANGLE_MIN)
+    #             target_y = position_ratio * (HEIGHT - self.image.get_height())
+    #             delta_y = target_y - self.rect.y
+
+    #             # Update velocity towards target position
+    #             self.velocity += delta_y * self.acceleration
+
+    #             # Apply friction
+    #             if self.velocity > 0:
+    #                 self.velocity -= self.friction
+    #             elif self.velocity < 0:
+    #                 self.velocity += self.friction
+
+    #             # Limit max speed
+    #             self.velocity = max(-self.max_speed, min(self.velocity, self.max_speed))
+
+    #             # Update position
+    #             self.rect.y += self.velocity
+    #             # Ensure bird stays within screen bounds
+    #             self.rect.y = max(0, min(self.rect.y, HEIGHT - self.image.get_height()))
+    #         else:
+    #             # Gradually slow down the bird
+    #             if self.velocity > 0:
+    #                 self.velocity -= self.friction
+    #             elif self.velocity < 0:
+    #                 self.velocity += self.friction
+    #             self.rect.y += self.velocity
+    #             self.rect.y = max(0, min(self.rect.y, HEIGHT - self.image.get_height()))
+    #     else:
+    #         # Fallback to keyboard controls
+    #         if keys_pressed[pygame.K_UP]:
+    #             self.velocity -= self.acceleration
+    #         elif keys_pressed[pygame.K_DOWN]:
+    #             self.velocity += self.acceleration
+    #         else:
+    #             if self.velocity > 0:
+    #                 self.velocity -= self.friction
+    #             elif self.velocity < 0:
+    #                 self.velocity += self.friction
+    #         self.velocity = max(-self.max_speed, min(self.velocity, self.max_speed))
+    #         self.rect.y += self.velocity
+    #         self.rect.y = max(0, min(self.rect.y, HEIGHT - self.image.get_height()))
+
+    #     # Update amplitudes based on new position
+    #     position_ratio = self.rect.y / (HEIGHT - self.image.get_height())
+    #     angle = position_ratio * (FLEX_SENSOR_MAX - FLEX_SENSOR_MIN) + FLEX_SENSOR_MIN
+    #     self.amplitudes.append((angle, angle))
+
+
+    def handle_collision(self):
+        self.is_invincible = True
+        self.invincible_start_time = pygame.time.get_ticks()
+        self.lives -= 1
+        print(f"Collision detected! Lives remaining: {self.lives}")
+
+
+    def check_invincibility(self):
+        if self.is_invincible:
+            current_time = pygame.time.get_ticks()
+            if current_time - self.invincible_start_time > INVINCIBLE_DURATION:
+                self.is_invincible = False
+
+    def draw(self, screen):
+        if self.is_invincible:
+            current_time = pygame.time.get_ticks()
+            if (current_time // BLINK_INTERVAL) % 2 == 0:
+                screen.blit(self.image, self.rect.topleft)
+        else:
+            screen.blit(self.image, self.rect.topleft)
+
+    def pass_obstacle(self):
+            self.obstacles_passed += 1
+            print(f"Obstacle passed! Total obstacles passed: {self.obstacles_passed}")
+
+# class Wood(pygame.sprite.Sprite):
+#     def __init__(self, image, x, y, bottom):
+#         super().__init__()
+#         self.image = image
+#         self.rect = self.image.get_rect()
+#         self.rect.topleft = (x, y)
+#         self.initial_x = x  # Store initial x position
+#         self.bottom = bottom
+#         self.passed = False
+
+#     def update(self):
+#         self.rect.x -= 3  # Fixed speed
+#         if self.rect.right < 0:
+#             self.rect.x = self.initial_x  # Reset to initial position
+#             self.passed = False
+class Wood(pygame.sprite.Sprite):
+    def __init__(self, image, x, y, bottom):
+        super().__init__()
+        self.image = image
+        self.rect = self.image.get_rect()
+        self.rect.topleft = (x, y)  # Posição diretamente do CSV
+        self.initial_x = x  # Armazena a posição inicial para referência
+        self.passed = False  # Para saber se o jogador já passou pelo tronco
+
+    def update(self):
+        self.rect.x -= 3  # Velocidade fixa para mover à esquerda
+        if self.rect.right < 0:  # Saiu da tela
+            self.kill()  # Remove o sprite da lista de ativos (não reseta mais)
+
+    def draw(self, screen):
+        screen.blit(self.image, self.rect.topleft)
+
+
+class Cloud(pygame.sprite.Sprite):
+    def __init__(self, image, x, y, speed):
+        super().__init__()
+        self.image = image
+        self.rect = self.image.get_rect()
+        self.rect.topleft = (x, y)
+        self.speed = speed
+
+    def update(self):
+        self.rect.x -= self.speed
+        if self.rect.right < 0:
+            self.rect.left = WIDTH
+
+    def draw(self, screen):
+        screen.blit(self.image, self.rect.topleft)
+
+
+
+
+
+
+
+
+
+# Código do arquivo: C:/Users/Alex Martins/Desktop/FEI/Mestrado FEI/Pesquisa/Software, Firmware/Software Marms/Software_V2.6 - FSR Sensors\FlyBird\modules\utils.py
+
+# modules/utils.py
+
+import pygame
+import os
+import random
+from FlyBird.modules.settings import *
+import csv
+
+def extract_number(filename):
+    try:
+        return int("".join(filter(str.isdigit, filename)))
+    except ValueError:
+        return 0
+    
+def load_obstacles_from_csv():
+    obstacles = []
+    csv_file = os.path.join(DATA_DIR, 'obstacles.csv')
+    if not os.path.exists(csv_file):
+        print(f"Obstacle CSV file not found: {csv_file}")
+        return obstacles
+
+    with open(csv_file, 'r', newline='') as csvfile:
+        reader = csv.DictReader(csvfile)
+        for row in reader:
+            obstacle_type = row['type']
+            filename = row['filename']
+            x = int(row['x'])
+            y = int(row['y'])
+            bottom = row['bottom'].lower() == 'true'
+            if obstacle_type == 'wood':
+                img = pygame.image.load(os.path.join(WOOD_DIR, filename)).convert_alpha()
+                scale_factor = 0.4
+                img = pygame.transform.scale(
+                    img,
+                    (int(img.get_width() * scale_factor), int(img.get_height() * scale_factor))
+                )
+                obstacles.append({'image': img, 'x': x, 'y': y, 'bottom': bottom})
+
+            # if obstacle_type == 'wood':
+            #     img = pygame.image.load(os.path.join(WOOD_DIR, filename)).convert_alpha()
+            #     scale_factor = 0.4
+            #     img = pygame.transform.scale(
+            #         img,
+            #         (int(img.get_width() * scale_factor),
+            #          int(img.get_height() * scale_factor))
+            #     )
+            #     if not bottom:
+            #         img = pygame.transform.flip(img, False, True)
+            #     obstacles.append({'image': img, 'x': x, 'y': y, 'bottom': bottom})
+            # Handle other obstacle types if needed
+    return obstacles
+
+
+def remove_background_with_tolerance(surface, base_color, tolerance):
+    surface = surface.copy()
+    surface.lock()
+    width, height = surface.get_size()
+    for x in range(width):
+        for y in range(height):
+            color = surface.get_at((x, y))
+            if all(abs(color[i] - base_color[i]) <= tolerance for i in range(3)):
+                surface.set_at((x, y), (0, 0, 0, 0))
+    surface.unlock()
+    return surface
+
+def load_images_from_folder(folder, scale_factor=1.0, remove_bg=False, base_color=(0, 255, 0)):
+    images = []
+    for file in sorted(os.listdir(folder), key=extract_number):
+        if file.endswith(".png"):
+            path = os.path.join(folder, file)
+            image = pygame.image.load(path).convert_alpha()
+            if scale_factor != 1.0:
+                image = pygame.transform.scale(
+                    image,
+                    (int(image.get_width() * scale_factor),
+                     int(image.get_height() * scale_factor))
+                )
+            if remove_bg:
+                image = remove_background_with_tolerance(image, base_color, TOLERANCE)
+            images.append(image)
+    return images
+
+def generate_clouds(cloud_images):
+    clouds = []
+    for _ in range(10):
+        img = random.choice(cloud_images)
+        scale_factor = random.uniform(0.5, 1.5)
+        img = pygame.transform.scale(
+            img,
+            (int(img.get_width() * scale_factor),
+             int(img.get_height() * scale_factor))
+        )
+        layer = random.choice(["front", "middle", "back"])
+        speed = {"front": 2, "middle": 1.5, "back": 1}[layer]
+        y_pos = random.randint(50, HEIGHT - 200)
+        clouds.append({"image": img, "x": random.randint(0, WIDTH), "y": y_pos, "speed": speed})
+    return clouds
+
+
+
+# def generate_woods(wood_images):
+#     woods = []
+#     x_position = WIDTH  # Start off-screen
+#     scale_factor = 0.4
+#     while len(woods) < 5:
+#         img = random.choice(wood_images)
+#         img = pygame.transform.scale(
+#             img,
+#             (int(img.get_width() * scale_factor),
+#              int(img.get_height() * scale_factor))
+#         )
+#         bottom_trunk = random.choice([True, False])
+#         if bottom_trunk:
+#             y_position = HEIGHT - img.get_height()
+#         else:
+#             y_position = -10
+#             img = pygame.transform.flip(img, False, True)
+#         woods.append({"image": img, "x": x_position, "y": y_position, "bottom": bottom_trunk})
+#         x_position += random.randint(200, 400)
+#     return woods
+
+def generate_woods():
+    woods = []
+    obstacles = load_obstacles_from_csv()
+    for obstacle_data in obstacles:
+        if obstacle_data['bottom']:
+            wood = {
+                "image": obstacle_data['image'],
+                "x": obstacle_data['x'],
+                "y": obstacle_data['y'],
+                "bottom": obstacle_data['bottom']
+            }
+            print(f"Wood generated at x={wood['x']}, y={wood['y']}")
+            woods.append(wood)
+    return woods
+
+
+
+
+
+
+
+
+
+# Código do arquivo: C:/Users/Alex Martins/Desktop/FEI/Mestrado FEI/Pesquisa/Software, Firmware/Software Marms/Software_V2.6 - FSR Sensors\FlyBird\modules\__init__.py
+
+# modules/__init__.py
+
+from FlyBird.modules.settings import *
+from FlyBird.modules.utils import *
+from FlyBird.modules.sprites import *
+from FlyBird.modules.game import *
+from FlyBird.modules.input_handler import *
+from FlyBird.modules.flex_sensor import *
+
+
+
+
+
+
+
+
+
+
+# Código do arquivo: C:/Users/Alex Martins/Desktop/FEI/Mestrado FEI/Pesquisa/Software, Firmware/Software Marms/Software_V2.6 - FSR Sensors\Modules\ble_manager.py
+
+# Modules/ble_manager.py
+
+from bleak import BleakClient
+import asyncio
+
+class BLEManager:
+    def __init__(self, address, characteristic_uuid, notification_handler):
+        self.address = address
+        self.characteristic_uuid = characteristic_uuid
+        self.notification_handler = notification_handler
+        self.client = None
+        self.loop = None
+        self.is_running = False
+
+    async def connect(self):
+        print(f"Tentando conectar ao dispositivo: {self.address}")
+        async with BleakClient(self.address) as client:
+            self.client = client
+            try:
+                await client.start_notify(self.characteristic_uuid, self.notification_handler)
+                print("Conectado ao dispositivo BLE e recebendo notificações.")
+                self.is_running = True
+                while self.is_running:
+                    await asyncio.sleep(0.1)
+            except Exception as e:
+                print(f"Erro na conexão BLE: {e}")
+
+    def start_loop(self):
+        self.loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self.loop)
+        try:
+            self.loop.run_until_complete(self.connect())
+        except Exception as e:
+            print(f"Erro no loop BLE: {e}")
+        finally:
+            self.loop.close()
+
+    def stop_loop(self):
+        self.is_running = False
+        if self.loop and self.loop.is_running():
+            self.loop.call_soon_threadsafe(self.loop.stop)
+
+
+
+
+
+
+
+
+
+# Código do arquivo: C:/Users/Alex Martins/Desktop/FEI/Mestrado FEI/Pesquisa/Software, Firmware/Software Marms/Software_V2.6 - FSR Sensors\Modules\calibration_manager.py
+
+# Modules/calibration_manager.py
+
+import customtkinter as ctk
+import threading
+import csv
+import time
+
+class CalibrationManager:
+    def __init__(self, root, sensors, latest_readings):
+        self.root = root
+        self.sensors = sensors
+        self.latest_readings = latest_readings
+
+    def open_calibration_window(self, sensor_name):
+        sensor = self.sensors[sensor_name]
+
+        is_recording = False
+        data_points = []
+
+        def start_stop_recording():
+            nonlocal is_recording
+            if not is_recording:
+                is_recording = True
+                record_button.configure(text="Parar Gravação")
+                data_points.clear()
+                threading.Thread(target=record_data).start()
+            else:
+                is_recording = False
+                record_button.configure(text="Iniciar Gravação")
+
+        def record_data():
+            while is_recording:
+                voltage = self.latest_readings.get(f"{sensor_name}_voltage", 0.0)
+                angle = self.latest_readings['goniometer_angle']
+                data_points.append((voltage, angle))
+                time.sleep(0.05)
+
+        def calibrate():
+            nonlocal is_recording
+            is_recording = False
+            record_button.configure(text="Iniciar Gravação")
+
+            if not data_points:
+                print("Nenhum dado gravado para calibração.")
+                return
+
+            data_points.sort(key=lambda x: x[1])
+            csv_filename = f"calibration_{sensor_name}.csv"
+            with open(csv_filename, 'w', newline='') as csvfile:
+                writer = csv.writer(csvfile)
+                writer.writerow(['Voltage', 'Angle'])
+                writer.writerows(data_points)
+            print(f"Dados de calibração salvos em {csv_filename}")
+
+            sensor.calibrate_with_data_points(data_points)
+            print(f"Calibração concluída para {sensor_name}!")
+            calibration_window.destroy()
+
+        calibration_window = ctk.CTkToplevel(self.root)
+        calibration_window.title(f"Calibração - {sensor_name.upper()}")
+
+        ctk.CTkLabel(calibration_window, text="Calibração com Múltiplos Pontos").pack(pady=10)
+
+        record_button = ctk.CTkButton(calibration_window, text="Iniciar Gravação", command=start_stop_recording)
+        record_button.pack(pady=10)
+
+        calibrate_button = ctk.CTkButton(calibration_window, text="Calibrar", command=calibrate)
+        calibrate_button.pack(pady=10)
+
+
+
+
+
+
+
+
+
+# Código do arquivo: C:/Users/Alex Martins/Desktop/FEI/Mestrado FEI/Pesquisa/Software, Firmware/Software Marms/Software_V2.6 - FSR Sensors\Modules\descobrir_dispositivos.py
+
+import asyncio
+from bleak import BleakScanner
+
+async def discover_devices():
+    devices = await BleakScanner.discover()
+    for device in devices:
+        print(f"Nome: {device.name}, Endereço: {device.address}")
+
+asyncio.run(discover_devices())
+
+
+
+
+
+
+
+
+
+# Código do arquivo: C:/Users/Alex Martins/Desktop/FEI/Mestrado FEI/Pesquisa/Software, Firmware/Software Marms/Software_V2.6 - FSR Sensors\Modules\fsr_calibrador.py
+
+# Modules/fsr_calibrador.py
+
+class FSRCalibrador:
+    def __init__(self):
+        pass
+
+    def calibrate(self, data_points):
+        # Futuramente implementaremos a calibração dos FSR aqui.
+        pass
+
+
+
+
+
+
+
+
+
+# Código do arquivo: C:/Users/Alex Martins/Desktop/FEI/Mestrado FEI/Pesquisa/Software, Firmware/Software Marms/Software_V2.6 - FSR Sensors\Modules\goniometer_manager.py
+
+# Modules/goniometer_manager.py
+
+import ctypes
+from ctypes import POINTER, byref, c_int
+import threading
+import time
+
+class GoniometerManager:
+    def __init__(self, dll_path, channel=0):
+        self.dll_path = dll_path
+        self.channel = channel
+        self.angle = 0
+        self.running = False
+        self.dll = None
+
+        # Tentar carregar a DLL
+        try:
+            self.dll = ctypes.WinDLL(self.dll_path)
+            # Configurações das funções da DLL
+            self.OnLineStatus = self.dll.OnLineStatus
+            self.OnLineStatus.argtypes = [c_int, c_int, POINTER(c_int)]
+            self.OnLineStatus.restype = c_int
+
+            # Constantes da DLL
+            self.OLI_ONLINE_GETVALUE = 4
+            self.OLI_ONLINE_OK = 0
+            self.OLI_ONLINE_START = 5
+            self.OLI_ONLINE_STOP = 6
+        except OSError as e:
+            print(f"Erro ao carregar a DLL do goniômetro: {e}")
+            self.dll = None  # Continua a execução mesmo se não conseguir carregar a DLL
+
+    def start_reading(self):
+        """Inicia a leitura do goniômetro em uma thread separada."""
+        if self.running or not self.dll:
+            return
+        self.running = True
+        self.thread = threading.Thread(target=self._read_data)
+        self.thread.daemon = True
+        self.thread.start()
+
+    def stop_reading(self):
+        """Para a leitura do goniômetro."""
+        if not self.dll:
+            return
+        self.running = False
+        self.OnLineStatus(self.channel, self.OLI_ONLINE_STOP, None)
+
+    def _read_data(self):
+        """Função que lê dados do goniômetro continuamente."""
+        if not self.dll:
+            return
+        # Inicia a transferência
+        result = self.OnLineStatus(self.channel, self.OLI_ONLINE_START, None)
+        if result != self.OLI_ONLINE_OK:
+            print(f"Erro ao iniciar transferência no canal {self.channel}: {result}")
+            return
+
+        try:
+            while self.running:
+                valor_atual = c_int()
+                result = self.OnLineStatus(self.channel, self.OLI_ONLINE_GETVALUE, byref(valor_atual))
+                if result == self.OLI_ONLINE_OK:
+                    self.angle = self._converter_para_graus(valor_atual.value)
+                else:
+                    print(f"Erro ao obter valor no canal {self.channel}: {result}")
+                time.sleep(0.05)  # Leitura a cada 50 ms
+        except Exception as e:
+            print(f"Erro na leitura do goniômetro: {e}")
+        finally:
+            self.stop_reading()
+
+    def _converter_para_graus(self, valor_bruto):
+        """Converte o valor bruto do goniômetro para graus."""
+        valor_convertido = int((valor_bruto / 4000) * 180)
+        return valor_convertido
+
+    def get_angle(self):
+        """Retorna o último ângulo lido."""
+        return self.angle
+
+
+
+
+
+
+
+
+
+# Código do arquivo: C:/Users/Alex Martins/Desktop/FEI/Mestrado FEI/Pesquisa/Software, Firmware/Software Marms/Software_V2.6 - FSR Sensors\Modules\gui_manager.py
+
+import customtkinter as ctk
+import threading
+import time
+import asyncio
+from .plot_manager import PlotManager
+from .calibration_manager import CalibrationManager
+from .goniometer_manager import GoniometerManager
+from .tests import Tests
+from .ble_manager import BLEManager
+from .fsr_calibrador import FSRCalibrador
+from bleak import BleakScanner
+import tkinter as tk
+
+CHARACTERISTIC_UUID = "abcdef01-1234-5678-1234-56789abcdef0"
+
+class GUIManager:
+    def __init__(self, root, sensors, latest_readings):
+        self.root = root
+        self.sensors = sensors
+        self.latest_readings = latest_readings
+        self.is_paused = False
+        self.ble_manager = None
+        self.ble_device_address = None
+        self.plot_mode = tk.StringVar(value="flex")  # "flex" ou "fsr"
+        self.displayed_sensors = set(sensors.keys()) 
+
+        self.goniometer = GoniometerManager(
+            dll_path=r"C:\Program Files (x86)\Biometrics Ltd\DataLITE\OnLineInterface64.dll",
+            channel=0
+        )
+
+        if self.goniometer.dll:
+            self.goniometer.start_reading()
+
+        self.sensor_vars = {}
+        for sensor_id in self.sensors.keys():
+            self.sensor_vars[sensor_id] = tk.BooleanVar(value=True)
+
+        self.goniometer_var = tk.BooleanVar(value=True)
+        self.visualizacao_frame_open = False
+
+        self.setup_ui()
+        self.update_gui()
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+    def setup_ui(self):
+        self.menu_bar = tk.Menu(self.root)
+        self.root.config(menu=self.menu_bar)
+
+        self.bluetooth_menu = tk.Menu(self.menu_bar, tearoff=0)
+        self.menu_bar.add_cascade(label="Bluetooth", menu=self.bluetooth_menu)
+        self.bluetooth_menu.add_command(label="Conectar...", command=self.open_bluetooth_window)
+
+        self.appearance_mode = tk.StringVar(value="Dark")
+        self.appearance_menu = tk.Menu(self.menu_bar, tearoff=0)
+        self.menu_bar.add_cascade(label="Aparência", menu=self.appearance_menu)
+        self.appearance_menu.add_radiobutton(label="Dark", variable=self.appearance_mode, command=self.change_appearance_mode, value="Dark")
+        self.appearance_menu.add_radiobutton(label="Light", variable=self.appearance_mode, command=self.change_appearance_mode, value="Light")
+
+        self.jogos_menu = tk.Menu(self.menu_bar, tearoff=0)
+        self.menu_bar.add_cascade(label="Jogos", menu=self.jogos_menu)
+        self.jogos_menu.add_radiobutton(label="FlyBird", command=self.open_game)
+
+        self.calibracoes_menu = tk.Menu(self.menu_bar, tearoff=0)
+        self.menu_bar.add_cascade(label="Calibrações", menu=self.calibracoes_menu)
+        flex_sensors_menu = tk.Menu(self.calibracoes_menu, tearoff=0)
+        self.calibracoes_menu.add_cascade(label="Flex Sensors", menu=flex_sensors_menu)
+
+        ctk.set_appearance_mode("dark")
+        ctk.set_default_color_theme("blue")
+
+        self.main_frame = ctk.CTkFrame(self.root)
+        self.main_frame.pack(fill="both", expand=True)
+
+        self.plot_manager = PlotManager(self.main_frame, time_window=10, sensors=self.sensors, displayed_sensors=self.displayed_sensors)
+        self.calibration_manager = CalibrationManager(self.root, self.sensors, self.latest_readings)
+
+        for sensor_id in self.sensors.keys():
+            flex_sensors_menu.add_command(
+                label=f"{sensor_id.upper()}",
+                command=lambda s=sensor_id: self.calibration_manager.open_calibration_window(s)
+            )
+
+        self.setup_controls()
+
+    def setup_controls(self):
+        self.frame_controls = ctk.CTkFrame(self.main_frame, width=300)
+        self.frame_controls.pack(side="right", fill="y")
+
+        self.visualizacao_frame = ctk.CTkFrame(self.main_frame)
+
+        self.visualizacao_button = ctk.CTkButton(
+            self.frame_controls,
+            text="Visualização",
+            command=self.toggle_visualizacao_frame
+        )
+        self.visualizacao_button.pack(pady=10)
+
+        ctk.CTkLabel(self.frame_controls, text="Modo de Plotagem").pack(pady=5)
+        flex_plot_rb = ctk.CTkRadioButton(
+            self.frame_controls,
+            text="FlexPlot",
+            variable=self.plot_mode,
+            value="flex",
+            command=self.update_displayed_sensors
+        )
+        flex_plot_rb.pack(pady=5)
+
+        fsr_plot_rb = ctk.CTkRadioButton(
+            self.frame_controls,
+            text="FSRPlot",
+            variable=self.plot_mode,
+            value="fsr",
+            command=self.update_displayed_sensors
+        )
+        fsr_plot_rb.pack(pady=5)
+
+        ctk.CTkCheckBox(
+            self.visualizacao_frame,
+            text="GONIÔMETRO",
+            variable=self.goniometer_var,
+            command=self.update_displayed_sensors
+        ).pack(anchor='w', padx=10, pady=5)
+
+        for sensor_id in self.sensors.keys():
+            ctk.CTkCheckBox(
+                self.visualizacao_frame,
+                text=sensor_id.upper(),
+                variable=self.sensor_vars[sensor_id],
+                command=self.update_displayed_sensors
+            ).pack(anchor='w', padx=10, pady=5)
+
+        clear_button = ctk.CTkButton(self.frame_controls, text="Limpar Dados", command=self.clear_data)
+        clear_button.pack(pady=10)
+
+        test_button = ctk.CTkButton(self.frame_controls, text="Testes", command=self.open_tests)
+        test_button.pack(pady=10)
+
+        ctk.CTkLabel(self.frame_controls, text="Suavização").pack(pady=10)
+        smoothing_slider = ctk.CTkSlider(
+            self.frame_controls, from_=0.01, to=1, number_of_steps=100,
+            command=self.adjust_smoothing
+        )
+        if 'flex1' in self.sensors:
+            smoothing_slider.set(self.sensors['flex1'].alpha)
+        smoothing_slider.pack(pady=10)
+
+    def toggle_visualizacao_frame(self):
+        if self.visualizacao_frame_open:
+            self.visualizacao_frame.pack_forget()
+            self.visualizacao_frame_open = False
+            self.visualizacao_button.configure(fg_color=None)
+        else:
+            self.visualizacao_frame.pack(side='right', fill='y')
+            self.visualizacao_frame_open = True
+            self.visualizacao_button.configure(fg_color="gray30")
+
+    def change_appearance_mode(self, *args):
+        mode = self.appearance_mode.get()
+        ctk.set_appearance_mode(mode)
+
+    def open_bluetooth_window(self):
+        self.bluetooth_window = ctk.CTkToplevel(self.root)
+        self.bluetooth_window.title("Dispositivos Bluetooth")
+        self.bluetooth_window.geometry("400x300")
+
+        self.bluetooth_window.lift()
+        self.bluetooth_window.attributes('-topmost', True)
+        self.bluetooth_window.after(10, lambda: self.bluetooth_window.attributes('-topmost', False))
+
+        ctk.CTkLabel(self.bluetooth_window, text="Dispositivos Disponíveis:").pack(pady=10)
+        self.devices_listbox = tk.Listbox(self.bluetooth_window)
+        self.devices_listbox.pack(fill="both", expand=True, padx=10, pady=5)
+
+        refresh_button = ctk.CTkButton(self.bluetooth_window, text="Atualizar Lista", command=self.scan_devices)
+        refresh_button.pack(pady=5)
+
+        connect_button = ctk.CTkButton(self.bluetooth_window, text="Conectar", command=self.connect_device)
+        connect_button.pack(pady=5)
+
+        self.scan_devices()
+
+    def scan_devices(self):
+        async def discover():
+            from bleak import BleakScanner
+            devices = await BleakScanner.discover()
+            self.devices_list = devices
+            self.devices_listbox.delete(0, 'end')
+            for idx, device in enumerate(devices):
+                display_name = device.name or "Desconhecido"
+                self.devices_listbox.insert('end', f"{display_name} ({device.address})")
+
+        def run_discover():
+            import asyncio
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(discover())
+            loop.close()
+
+        threading.Thread(target=run_discover).start()
+
+    def connect_device(self):
+        selection = self.devices_listbox.curselection()
+        if selection:
+            idx = selection[0]
+            device_address = self.devices_list[idx].address
+            self.ble_device_address = device_address
+            self.start_ble(self.ble_device_address)
+            self.bluetooth_window.destroy()
+
+    def start_ble(self, device_address):
+        if self.ble_manager is not None:
+            self.ble_manager.stop_loop()
+        self.ble_manager = BLEManager(device_address, CHARACTERISTIC_UUID, self.notification_handler)
+        threading.Thread(target=self.ble_manager.start_loop, daemon=True).start()
+
+    # def notification_handler(self, sender, data):
+    #     decoded_data = data.decode("utf-8")
+    #     try:
+    #         values = decoded_data.split(", ")
+    #         for value in values:
+    #             sensor_name, voltage_str = value.split("=")
+    #             voltage = float(voltage_str[:-1])  
+    #             sensor_id = sensor_name.lower()
+
+    #             if sensor_id in self.sensors:
+    #                 filtered_voltage = self.sensors[sensor_id].apply_filter(voltage)
+    #                 self.latest_readings[f'{sensor_id}_voltage'] = filtered_voltage
+
+    #                 if sensor_id.startswith('flex'):
+    #                     angle = self.sensors[sensor_id].get_angle(filtered_voltage)
+    #                     self.latest_readings[f'{sensor_id}_angle'] = angle
+    #                 elif sensor_id.startswith('fsr'):
+    #                     force = filtered_voltage * 1000.0
+    #                     self.latest_readings[f'{sensor_id}_force'] = force
+    #     except Exception as e:
+    #         print(f"Erro ao processar dados: {e}")
+
+
+    def notification_handler(self, sender, data):
+        decoded_data = data.decode("utf-8")
+        try:
+            values = decoded_data.split(", ")
+            for value in values:
+                sensor_name, voltage_str = value.split("=")
+                voltage = float(voltage_str[:-1])  
+                sensor_id = sensor_name.lower()
+
+                if sensor_id in self.sensors:
+                    filtered_voltage = self.sensors[sensor_id].apply_filter(voltage)
+                    self.latest_readings[f'{sensor_id}_voltage'] = filtered_voltage
+
+                    if sensor_id.startswith('flex'):
+                        angle = self.sensors[sensor_id].get_angle(filtered_voltage)
+                        self.latest_readings[f'{sensor_id}_angle'] = angle
+                    elif sensor_id.startswith('fsr'):
+                        # Agora usamos get_force para aplicar a calibração polinomial se existir
+                        force = self.sensors[sensor_id].get_force(filtered_voltage)
+                        self.latest_readings[f'{sensor_id}_force'] = force
+        except Exception as e:
+            print(f"Erro ao processar dados: {e}")
+
+
+
+    def clear_data(self):
+        self.plot_manager.clear()
+
+    def adjust_smoothing(self, value):
+        for sensor in self.sensors.values():
+            sensor.alpha = float(value)
+        print(f"Nível de suavização ajustado para: {value}")
+
+    def open_game(self):
+        import threading
+        from FlyBird.main_fb import main_fb
+        def run_game():
+            main_fb(sensor_data_provider=lambda: self.get_flex_angle('flex6'))
+        threading.Thread(target=run_game, daemon=True).start()
+
+    def get_flex_angle(self, sensor_id):
+        return self.latest_readings.get(f'{sensor_id}_angle', 0.0)
+
+    def open_tests(self):
+        tests = Tests(self.root, sensors=self.sensors, latest_readings=self.latest_readings, goniometer=self.goniometer)
+        tests.open_tests_window()
+
+    def update_gui(self):
+        if not self.is_paused:
+            current_time = time.time()
+            if self.goniometer.dll:
+                self.latest_readings['goniometer_angle'] = self.goniometer.get_angle()
+            else:
+                self.latest_readings['goniometer_angle'] = 0
+
+            self.plot_manager.set_mode(self.plot_mode.get())
+            self.plot_manager.update(current_time, self.latest_readings)
+
+        self.root.after(10, self.update_gui)
+
+    def on_closing(self):
+        if self.goniometer.dll:
+            self.goniometer.stop_reading()
+        if self.ble_manager is not None:
+            self.ble_manager.stop_loop()
+        self.root.destroy()
+
+    def update_displayed_sensors(self):
+        chosen_sensors = set()
+        for sensor_id, var in self.sensor_vars.items():
+            if var.get():
+                chosen_sensors.add(sensor_id)
+
+        if self.plot_mode.get() == "flex":
+            # modo flex: flex + goniometro se marcado
+            if self.goniometer_var.get():
+                chosen_sensors.add('goniometer')
+            else:
+                if 'goniometer' in chosen_sensors:
+                    chosen_sensors.remove('goniometer')
+            final_sensors = {s for s in chosen_sensors if s.startswith('flex') or s == 'goniometer'}
+        else:
+            # modo fsr: apenas fsr
+            if 'goniometer' in chosen_sensors:
+                chosen_sensors.remove('goniometer')
+            final_sensors = {s for s in chosen_sensors if s.startswith('fsr')}
+
+        self.displayed_sensors = final_sensors
+        self.plot_manager.update_displayed_sensors(self.displayed_sensors)
+
+
+
+
+
+
+
+
+
+# Código do arquivo: C:/Users/Alex Martins/Desktop/FEI/Mestrado FEI/Pesquisa/Software, Firmware/Software Marms/Software_V2.6 - FSR Sensors\Modules\plot_manager.py
+
+# Modules/plot_manager.py
+
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from collections import deque
+import matplotlib.pyplot as plt
+
+class PlotManager:
+    def __init__(self, parent, time_window=10, sensors=None, displayed_sensors=None):
+        self.time_window = time_window
+        self.sensors = sensors
+        self.displayed_sensors = displayed_sensors if displayed_sensors is not None else set(sensors.keys())
+        self.plot_mode = "flex"  # "flex" ou "fsr"
+
+        self.time_history = deque()
+        self.voltage_histories = {sensor_id: deque() for sensor_id in sensors.keys()}
+        self.angle_histories = {sensor_id: deque() for sensor_id in sensors.keys() if sensor_id.startswith('flex')}
+        self.force_histories = {sensor_id: deque() for sensor_id in sensors.keys() if sensor_id.startswith('fsr')}
+        self.goniometer_history = deque()
+
+        self.fig = Figure(figsize=(12, 6), dpi=100)
+        self.ax_voltage = self.fig.add_subplot(1, 2, 1)
+        self.ax_detail = self.fig.add_subplot(1, 2, 2)  # ax_detail será ângulo ou força, dependendo do modo
+        self.fig.subplots_adjust(wspace=0.4)
+
+        # Definir cores e criar dicionário de cores para cada sensor
+        colors = plt.cm.tab10.colors
+        sensor_list = sorted(sensors.keys())
+        sensor_colors = {}
+        for i, sid in enumerate(sensor_list):
+            sensor_colors[sid] = colors[i % 10]
+
+        # Criar linhas
+        # Cada sensor terá linha de tensão no ax_voltage
+        self.voltage_lines = {}
+        for sid in self.sensors.keys():
+            self.voltage_lines[sid], = self.ax_voltage.plot([], [], label=f"{sid.upper()} Voltage", color=sensor_colors[sid])
+
+        # Para flex: angle_lines
+        self.angle_lines = {}
+        for sid in self.angle_histories.keys():
+            self.angle_lines[sid], = self.ax_detail.plot([], [], label=sid.upper(), color=sensor_colors[sid])
+
+        # Para fsr: force_lines
+        self.force_lines = {}
+        for sid in self.force_histories.keys():
+            self.force_lines[sid], = self.ax_detail.plot([], [], label=sid.upper(), color=sensor_colors[sid])
+
+        # Goniômetro
+        self.line_goniometer_angle, = self.ax_detail.plot([], [], label="GONIÔMETRO", color="black", linestyle='solid')
+
+        # Ajuste inicial dos eixos
+        self.ax_voltage.set_title("Tensão (V) x Tempo")
+        self.ax_voltage.set_xlabel("Tempo (s)")
+        self.ax_voltage.set_ylabel("Tensão (V)")
+        self.ax_voltage.set_ylim(0, 4)
+
+        # O ax_detail mudará conforme o modo, ajustamos no update
+        # Inicialmente modo flex
+        self.set_flex_mode_labels()
+
+        self.canvas = FigureCanvasTkAgg(self.fig, master=parent)
+        self.canvas.get_tk_widget().pack(side="left", fill="both", expand=True)
+        self.canvas.draw()
+
+    def set_mode(self, mode):
+        self.plot_mode = mode
+
+    def set_flex_mode_labels(self):
+        self.ax_detail.set_title("Ângulo (°) x Tempo")
+        self.ax_detail.set_xlabel("Tempo (s)")
+        self.ax_detail.set_ylabel("Ângulo (°)")
+        self.ax_detail.set_ylim(-10, 300)
+
+    def set_fsr_mode_labels(self):
+        self.ax_detail.set_title("Força x Tempo")
+        self.ax_detail.set_xlabel("Tempo (s)")
+        self.ax_detail.set_ylabel("Força (kgf)")
+        self.ax_detail.set_ylim(-10, 400)
+
+        # Ajuste dinâmico no update
+
+    def update(self, current_time, latest_readings):
+        # Armazenar dados
+        self.time_history.append(current_time)
+        for sid in self.sensors.keys():
+            self.voltage_histories[sid].append(latest_readings.get(f'{sid}_voltage', 0.0))
+        for sid in self.angle_histories.keys():
+            self.angle_histories[sid].append(latest_readings.get(f'{sid}_angle', 0.0))
+        for sid in self.force_histories.keys():
+            self.force_histories[sid].append(latest_readings.get(f'{sid}_force', 0.0))
+        self.goniometer_history.append(latest_readings.get('goniometer_angle', 0.0))
+
+        # Remover dados antigos
+        while self.time_history and (current_time - self.time_history[0]) > self.time_window:
+            self.time_history.popleft()
+            for sid in self.sensors.keys():
+                self.voltage_histories[sid].popleft()
+                if sid in self.angle_histories:
+                    self.angle_histories[sid].popleft()
+                if sid in self.force_histories:
+                    self.force_histories[sid].popleft()
+            self.goniometer_history.popleft()
+
+        times = [t - self.time_history[0] for t in self.time_history]
+
+        # Atualizar linhas de voltagem sempre
+        for sid in self.sensors.keys():
+            if sid in self.displayed_sensors:
+                self.voltage_lines[sid].set_data(times, self.voltage_histories[sid])
+                self.voltage_lines[sid].set_visible(True)
+            else:
+                self.voltage_lines[sid].set_visible(False)
+
+        # Agora dependendo do modo
+        if self.plot_mode == "flex":
+            # Ajustar labels do modo flex
+            self.set_flex_mode_labels()
+            # Somente flex e goniômetro
+            # angle_lines visíveis se no displayed_sensors
+            for sid in self.angle_histories.keys():
+                if sid in self.displayed_sensors:
+                    self.angle_lines[sid].set_data(times, self.angle_histories[sid])
+                    self.angle_lines[sid].set_visible(True)
+                else:
+                    self.angle_lines[sid].set_visible(False)
+
+            # force_lines invisíveis
+            for sid in self.force_histories.keys():
+                self.force_lines[sid].set_visible(False)
+
+            # goniômetro visível se marcado
+            if 'goniometer' in self.displayed_sensors:
+                self.line_goniometer_angle.set_data(times, self.goniometer_history)
+                self.line_goniometer_angle.set_visible(True)
+            else:
+                self.line_goniometer_angle.set_visible(False)
+
+        else:
+            # Modo fsr
+            self.set_fsr_mode_labels()
+            # Somente fsr sensors
+            # force_lines
+            max_force = 0
+            for sid in self.force_histories.keys():
+                if sid in self.displayed_sensors:
+                    self.force_lines[sid].set_data(times, self.force_histories[sid])
+                    self.force_lines[sid].set_visible(True)
+                    # Calcular max force para ajustar limite do eixo
+                    local_max = max(self.force_histories[sid]) if len(self.force_histories[sid]) > 0 else 0
+                    if local_max > max_force:
+                        max_force = local_max
+                else:
+                    self.force_lines[sid].set_visible(False)
+
+            # angle_lines invisíveis no modo fsr
+            for sid in self.angle_histories.keys():
+                self.angle_lines[sid].set_visible(False)
+
+            # goniômetro invisível no modo fsr
+            self.line_goniometer_angle.set_visible(False)
+
+            # Ajustar limite do eixo de força
+            self.ax_detail.set_ylim(0, 10)
+
+        # Atualizar legendas
+        visible_handles = []
+        visible_labels = []
+        if self.plot_mode == "flex":
+            # angle + goniômetro
+            for sid in self.angle_histories.keys():
+                if sid in self.displayed_sensors:
+                    visible_handles.append(self.angle_lines[sid])
+                    visible_labels.append(sid.upper())
+            if 'goniometer' in self.displayed_sensors:
+                visible_handles.append(self.line_goniometer_angle)
+                visible_labels.append("GONIÔMETRO")
+        else:
+            # fsr mode
+            for sid in self.force_histories.keys():
+                if sid in self.displayed_sensors:
+                    visible_handles.append(self.force_lines[sid])
+                    visible_labels.append(sid.upper())
+
+        self.fig.legends.clear()
+        if visible_handles:
+            self.fig.legend(visible_handles, visible_labels, loc='center', bbox_to_anchor=(0.5, 0.5), bbox_transform=self.fig.transFigure)
+
+        self.ax_voltage.set_xlim(0, self.time_window)
+        self.ax_detail.set_xlim(0, self.time_window)
+
+        self.canvas.draw()
+
+    def clear(self):
+        self.time_history.clear()
+        for sid in self.sensors.keys():
+            self.voltage_histories[sid].clear()
+            if sid in self.angle_histories:
+                self.angle_histories[sid].clear()
+            if sid in self.force_histories:
+                self.force_histories[sid].clear()
+        self.goniometer_history.clear()
+
+        for line in self.voltage_lines.values():
+            line.set_data([], [])
+        for line in self.angle_lines.values():
+            line.set_data([], [])
+        for line in self.force_lines.values():
+            line.set_data([], [])
+        self.line_goniometer_angle.set_data([], [])
+
+        self.fig.legends.clear()
+        self.canvas.draw()
+
+    def update_displayed_sensors(self, displayed_sensors):
+        self.displayed_sensors = displayed_sensors
+
+
+
+
+
+
+
+
+
+# Código do arquivo: C:/Users/Alex Martins/Desktop/FEI/Mestrado FEI/Pesquisa/Software, Firmware/Software Marms/Software_V2.6 - FSR Sensors\Modules\sensor_data.py
+
+# # Modules/sensor_data.py
+
+# import numpy as np
+# import csv
+# import os
+
+# class SensorData:
+#     def __init__(self, alpha=0.1):
+#         self.alpha = alpha  # Constante do filtro passa-baixa
+#         self.filtered_value = 0  # Tensão filtrada
+#         self.filtered_angle = 0  # Ângulo filtrado
+#         self.calibration_function = None  # Função de calibração
+
+#     def apply_filter(self, raw_value):
+#         self.filtered_value = self.alpha * raw_value + (1 - self.alpha) * self.filtered_value
+#         return self.filtered_value
+
+#     def calibrate_with_data_points(self, data_points):
+#         voltages, angles = zip(*data_points)
+#         # Ajuste polinomial de grau 2 para calibração
+#         self.calibration_function = np.poly1d(np.polyfit(voltages, angles, deg=2))
+
+#     def get_angle(self, tension):
+#         if self.calibration_function is None:
+#             return 0
+#         # Calcular ângulo usando a função de calibração
+#         angle = self.calibration_function(tension)
+#         # Aplicar filtro passa-baixa ao ângulo
+#         self.filtered_angle = self.alpha * angle + (1 - self.alpha) * self.filtered_angle
+#         return self.filtered_angle
+
+#     def load_calibration_from_file(self, csv_filename):
+#         if not os.path.exists(csv_filename):
+#             print(f"Arquivo de calibração {csv_filename} não encontrado.")
+#             return False
+#         with open(csv_filename, 'r', newline='') as csvfile:
+#             reader = csv.reader(csvfile)
+#             next(reader)  # Pular o cabeçalho
+#             data_points = [(float(row[0]), float(row[1])) for row in reader]
+#         self.calibrate_with_data_points(data_points)
+#         print(f"Dados de calibração carregados de {csv_filename}")
+#         return True
+
+
+
+import numpy as np
+import csv
+import os
+
+class SensorData:
+    def __init__(self, alpha=0.1):
+        self.alpha = alpha  # Constante do filtro passa-baixa
+        self.filtered_value = 0  # Tensão filtrada
+        self.filtered_angle = 0  # Ângulo filtrado
+        self.filtered_force = 0  # Força filtrada (para fsr)
+        self.calibration_function = None  # Função de calibração
+
+    def apply_filter(self, raw_value):
+        self.filtered_value = self.alpha * raw_value + (1 - self.alpha) * self.filtered_value
+        return self.filtered_value
+
+    def calibrate_with_data_points(self, data_points):
+        voltages, values = zip(*data_points)
+        # Ajuste polinomial de grau 2 para calibração
+        self.calibration_function = np.poly1d(np.polyfit(voltages, values, deg=2))
+
+    def get_angle(self, tension):
+        if self.calibration_function is None:
+            return 0
+        # Calcular "Ângulo" usando a função de calibração
+        angle = self.calibration_function(tension)
+        # Aplicar filtro passa-baixa ao ângulo
+        self.filtered_angle = self.alpha * angle + (1 - self.alpha) * self.filtered_angle
+        return self.filtered_angle
+
+    def get_force(self, tension):
+        # Mesmo raciocínio do get_angle, mas para força.
+        # Usa a mesma calibration_function, mas interpretamos o valor retornado como força.
+        if self.calibration_function is None:
+            # Caso não exista calibração, usa um fallback simples, por ex:
+            return tension * 1000.0
+        force = self.calibration_function(tension)
+        # Aplica filtro passa-baixa à força, similar ao ângulo
+        self.filtered_force = self.alpha * force + (1 - self.alpha) * self.filtered_force
+        return self.filtered_force
+
+    def load_calibration_from_file(self, csv_filename):
+        if not os.path.exists(csv_filename):
+            print(f"Arquivo de calibração {csv_filename} não encontrado.")
+            return False
+        with open(csv_filename, 'r', newline='') as csvfile:
+            reader = csv.reader(csvfile)
+            next(reader)  # Pular o cabeçalho
+            data_points = [(float(row[0]), float(row[1])) for row in reader]
+        self.calibrate_with_data_points(data_points)
+        print(f"Dados de calibração carregados de {csv_filename}")
+        return True
+
+
+
+
+
+
+
+
+
+# Código do arquivo: C:/Users/Alex Martins/Desktop/FEI/Mestrado FEI/Pesquisa/Software, Firmware/Software Marms/Software_V2.6 - FSR Sensors\Modules\teste_ui.py
+
+# import customtkinter as ctk
+# from tkinter import Tk, Menu
+# from tkinter import ttk
+
+# # Inicialização do customtkinter
+# ctk.set_appearance_mode("dark")  # Modo inicial: dark
+# ctk.set_default_color_theme("blue")
+
+# class ToolTip(object):
+#     """
+#     Classe para criar tooltips em widgets.
+#     """
+#     def __init__(self, widget, text='widget info'):
+#         self.waittime = 500     # Tempo de espera em milissegundos
+#         self.wraplength = 180   # Comprimento da quebra de linha em pixels
+#         self.widget = widget
+#         self.text = text
+#         self.widget.bind("<Enter>", self.enter)
+#         self.widget.bind("<Leave>", self.leave)
+#         self.id = None
+#         self.tw = None
+
+#     def enter(self, event=None):
+#         self.schedule()
+
+#     def leave(self, event=None):
+#         self.unschedule()
+#         self.hidetip()
+
+#     def schedule(self):
+#         self.unschedule()
+#         self.id = self.widget.after(self.waittime, self.showtip)
+
+#     def unschedule(self):
+#         id_ = self.id
+#         self.id = None
+#         if id_:
+#             self.widget.after_cancel(id_)
+
+#     def showtip(self, event=None):
+#         x, y, cx, cy = self.widget.bbox("insert")
+#         x += self.widget.winfo_rootx() + 25
+#         y += self.widget.winfo_rooty() + 20
+#         # Criação da janela tooltip
+#         self.tw = ctk.CTkToplevel(self.widget)
+#         self.tw.wm_overrideredirect(True)  # Remover bordas da janela
+#         self.tw.wm_geometry("+%d+%d" % (x, y))
+#         label = ctk.CTkLabel(self.tw, text=self.text, justify='left')
+#         label.pack(ipadx=10, ipady=5)
+
+#     def hidetip(self):
+#         tw = self.tw
+#         self.tw= None
+#         if tw:
+#             tw.destroy()
+
+# class App(ctk.CTk):
+
+#     def __init__(self):
+#         super().__init__()
+
+#         self.title("Interface CustomTkinter")
+#         self.geometry("800x600")
+#         self.grid_columnconfigure(1, weight=1)
+#         self.grid_rowconfigure(0, weight=1)
+
+#         # Menu superior
+#         menubar = Menu(self)
+#         menu_principal = Menu(menubar, tearoff=0)
+#         menu_principal.add_command(label="Opção 1")
+#         menu_principal.add_command(label="Opção 2")
+#         menubar.add_cascade(label="Menu", menu=menu_principal)
+#         menubar.add_command(label="Configurações")
+#         menubar.add_command(label="Ajuda")
+#         self.config(menu=menubar)
+
+#         # Frame esquerdo com botões
+#         left_frame = ctk.CTkFrame(self, width=200, corner_radius=0)
+#         left_frame.grid(row=0, column=0, sticky="nswe")
+#         left_frame.grid_rowconfigure(5, weight=1)
+
+#         button1 = ctk.CTkButton(left_frame, text="CTkButton")
+#         button1.grid(row=1, column=0, padx=20, pady=10, sticky="we")
+#         ToolTip(button1, text="Este é um botão CTkButton.")
+
+#         button2 = ctk.CTkButton(left_frame, text="Disabled CTkButton", state="disabled")
+#         button2.grid(row=2, column=0, padx=20, pady=10, sticky="we")
+#         ToolTip(button2, text="Este botão está desativado.")
+
+#         # Componentes de entrada e controle
+#         entry = ctk.CTkEntry(self, placeholder_text="Digite algo...")
+#         entry.grid(row=0, column=1, padx=20, pady=(20, 10), sticky="we")
+#         ToolTip(entry, text="Insira seu texto aqui.")
+
+#         combobox = ctk.CTkComboBox(self, values=["Opção 1", "Opção 2", "Opção 3"])
+#         combobox.grid(row=1, column=1, padx=20, pady=10, sticky="we")
+#         ToolTip(combobox, text="Selecione uma opção.")
+
+#         slider = ctk.CTkSlider(self, from_=0, to=100)
+#         slider.grid(row=2, column=1, padx=20, pady=10, sticky="we")
+#         ToolTip(slider, text="Ajuste o valor do slider.")
+
+#         switch = ctk.CTkSwitch(self, text="CTkSwitch")
+#         switch.grid(row=3, column=1, padx=20, pady=10)
+#         ToolTip(switch, text="Ative ou desative a opção.")
+
+#         # Rótulos e seleção
+#         label = ctk.CTkLabel(self, text="CTkLabel - Exemplo de texto")
+#         label.grid(row=4, column=1, padx=20, pady=10)
+#         ToolTip(label, text="Este é um rótulo CTkLabel.")
+
+#         radiobutton_var = ctk.StringVar(value="Opção 1")
+
+#         radiobutton1 = ctk.CTkRadioButton(self, text="Opção 1", variable=radiobutton_var, value="Opção 1")
+#         radiobutton1.grid(row=5, column=1, padx=20, pady=5, sticky="w")
+#         ToolTip(radiobutton1, text="Selecione a opção 1.")
+
+#         radiobutton2 = ctk.CTkRadioButton(self, text="Opção 2", variable=radiobutton_var, value="Opção 2")
+#         radiobutton2.grid(row=6, column=1, padx=20, pady=5, sticky="w")
+#         ToolTip(radiobutton2, text="Selecione a opção 2.")
+
+#         checkbox = ctk.CTkCheckBox(self, text="CTkCheckBox")
+#         checkbox.grid(row=7, column=1, padx=20, pady=5, sticky="w")
+#         ToolTip(checkbox, text="Marque para selecionar.")
+
+#         checkbox_disabled = ctk.CTkCheckBox(self, text="Disabled CTkCheckBox", state="disabled")
+#         checkbox_disabled.grid(row=8, column=1, padx=20, pady=5, sticky="w")
+#         ToolTip(checkbox_disabled, text="Este checkbox está desativado.")
+
+#         # Seletor de modo de aparência
+#         appearance_mode_label = ctk.CTkLabel(self, text="Modo de Aparência:")
+#         appearance_mode_label.grid(row=9, column=1, padx=20, pady=(20, 5), sticky="w")
+
+#         appearance_mode_optionmenu = ctk.CTkOptionMenu(self, values=["Dark", "Light"], command=self.change_appearance_mode)
+#         appearance_mode_optionmenu.grid(row=10, column=1, padx=20, pady=(5, 20), sticky="we")
+#         appearance_mode_optionmenu.set("Dark")
+#         ToolTip(appearance_mode_optionmenu, text="Altere o modo de aparência.")
+
+#         # Tornar a janela responsiva
+#         self.columnconfigure(1, weight=1)
+#         self.rowconfigure(0, weight=1)
+
+#     def change_appearance_mode(self, new_mode):
+#         ctk.set_appearance_mode(new_mode)
+
+# if __name__ == "__main__":
+#     app = App()
+#     app.mainloop()
+
+
+# import customtkinter as ctk
+# from tkinter import Menu
+
+# class App(ctk.CTk):
+#     def __init__(self):
+#         super().__init__()
+#         self.title("Menu com Cascatas")
+#         self.geometry("400x300")
+        
+#         # Menu superior
+#         menubar = Menu(self)
+        
+#         # Menu principal
+#         menu_principal = Menu(menubar, tearoff=0)
+#         menu_principal.add_command(label="Opção 1", command=lambda: print("Opção 1 Selecionada"))
+#         menu_principal.add_command(label="Opção 2", command=lambda: print("Opção 2 Selecionada"))
+        
+#         # Submenu 1
+#         submenu_1 = Menu(menu_principal, tearoff=0)
+#         submenu_1.add_command(label="SubOpção 1.1", command=lambda: print("SubOpção 1.1 Selecionada"))
+#         submenu_1.add_command(label="SubOpção 1.2", command=lambda: print("SubOpção 1.2 Selecionada"))
+#         menu_principal.add_cascade(label="Submenu 1", menu=submenu_1)
+        
+#         # Submenu 2 dentro do Submenu 1
+#         submenu_2 = Menu(submenu_1, tearoff=0)
+#         submenu_2.add_command(label="SubOpção 2.1", command=lambda: print("SubOpção 2.1 Selecionada"))
+#         submenu_2.add_command(label="SubOpção 2.2", command=lambda: print("SubOpção 2.2 Selecionada"))
+#         submenu_1.add_cascade(label="Submenu 2", menu=submenu_2)
+        
+#         # Adicionar o menu principal à barra de menu
+#         menubar.add_cascade(label="Menu", menu=menu_principal)
+        
+#         # Outros menus
+#         menubar.add_command(label="Configurações", command=lambda: print("Configurações Selecionadas"))
+#         menubar.add_command(label="Ajuda", command=lambda: print("Ajuda Selecionada"))
+        
+#         # Configurar o menu na janela
+#         self.config(menu=menubar)
+
+# if __name__ == "__main__":
+#     app = App()
+#     app.mainloop()
+
+
+
+
+
+a = 961.16
+b = -323.15
+
+# Geração de 500 pontos
+num_points = 500
+voltages = [0.5 + i*(1.0/(num_points-1)) for i in range(num_points)]  # 500 valores de 0.5 a 1.5
+
+with open("dados.csv", "w", newline="", encoding="utf-8") as f:
+    f.write("Voltage,Angle\n")
+    for v in voltages:
+        angle = a*v + b
+        f.write(f"{v},{angle}\n")
+
+print("Arquivo 'dados.csv' gerado com sucesso.")
+
+
+
+
+
+
+
+
+
+# Código do arquivo: C:/Users/Alex Martins/Desktop/FEI/Mestrado FEI/Pesquisa/Software, Firmware/Software Marms/Software_V2.6 - FSR Sensors\Modules\tests.py
+
+import customtkinter as ctk
+import threading
+import time
+import csv
+import os
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import numpy as np
+
+class Tests:
+    def __init__(self, root, sensors, latest_readings, goniometer):
+        self.root = root
+        self.sensors = sensors
+        self.latest_readings = latest_readings
+        self.goniometer = goniometer
+        self.selected_sensor = None
+        self.is_recording = False
+        self.recorded_data = []
+        self.start_time = None
+        self.sample_count = 0
+
+    def open_tests_window(self):
+        self.test_window = ctk.CTkToplevel(self.root)
+        self.test_window.title("Testes dos Flex Sensors")
+
+        # Frame principal
+        self.main_frame = ctk.CTkFrame(self.test_window)
+        self.main_frame.pack(fill="both", expand=True)
+
+        # Interface inicial: seleção do sensor
+        ctk.CTkLabel(self.main_frame, text="Selecione o Flex Sensor para Teste:").pack(pady=10)
+
+        for sensor_name in self.sensors.keys():
+            sensor_button = ctk.CTkButton(
+                self.main_frame, text=sensor_name.upper(),
+                command=lambda s=sensor_name: self.select_sensor(s)
+            )
+            sensor_button.pack(pady=5)
+
+    def select_sensor(self, sensor_name):
+        # Limpa a interface atual
+        for widget in self.main_frame.winfo_children():
+            widget.destroy()
+
+        self.selected_sensor = sensor_name
+        self.is_recording = False
+        self.recorded_data = []
+        self.start_time = None
+        self.sample_count = 0
+
+        # Nova interface com botões e labels
+        ctk.CTkLabel(self.main_frame, text=f"Teste do {sensor_name.upper()}").pack(pady=10)
+
+        self.record_button = ctk.CTkButton(self.main_frame, text="Gravar", command=self.start_recording)
+        self.record_button.pack(pady=5)
+
+        self.stop_button = ctk.CTkButton(self.main_frame, text="Parar Gravação", command=self.stop_recording, state="disabled")
+        self.stop_button.pack(pady=5)
+
+        self.show_button = ctk.CTkButton(self.main_frame, text="Mostrar Gráficos e Métricas", command=self.show_results, state="disabled")
+        self.show_button.pack(pady=5)
+
+        self.time_label = ctk.CTkLabel(self.main_frame, text="Tempo: 0.00 s")
+        self.time_label.pack(pady=5)
+
+        self.sample_label = ctk.CTkLabel(self.main_frame, text="Amostras coletadas: 0")
+        self.sample_label.pack(pady=5)
+
+        self.update_timer()
+
+    def start_recording(self):
+        if not self.is_recording:
+            self.is_recording = True
+            self.record_button.configure(state="disabled")
+            self.stop_button.configure(state="normal")
+            self.start_time = time.time()
+            self.sample_count = 0
+            self.recorded_data = []
+            self.record_data()
+
+    def stop_recording(self):
+        if self.is_recording:
+            self.is_recording = False
+            self.record_button.configure(state="normal")
+            self.stop_button.configure(state="disabled")
+            self.show_button.configure(state="normal")
+            self.save_data_to_csv()
+
+    def record_data(self):
+        if self.is_recording:
+            current_time = time.time() - self.start_time
+            flex_voltage = self.latest_readings[f"{self.selected_sensor}_voltage"]
+            flex_angle = self.latest_readings[f"{self.selected_sensor}_angle"]
+            goniometer_angle = self.latest_readings['goniometer_angle']
+            self.recorded_data.append({
+                'time': current_time,
+                'flex_voltage': flex_voltage,
+                'flex_angle': flex_angle,
+                'goniometer_angle': goniometer_angle
+            })
+            self.sample_count += 1
+            # Agendar próxima leitura
+            self.main_frame.after(50, self.record_data)  # Ajuste o intervalo conforme necessário
+
+    def update_timer(self):
+        if self.is_recording:
+            elapsed_time = time.time() - self.start_time
+            self.time_label.configure(text=f"Tempo: {elapsed_time:.2f} s")
+            self.sample_label.configure(text=f"Amostras coletadas: {self.sample_count}")
+        self.main_frame.after(100, self.update_timer)
+
+    def save_data_to_csv(self):
+        # Criar diretório de dados se não existir
+        data_dir = 'data_tests'
+        if not os.path.exists(data_dir):
+            os.makedirs(data_dir)
+        filename = f'{data_dir}/test_{self.selected_sensor}_{int(time.time())}.csv'
+        with open(filename, 'w', newline='') as csvfile:
+            fieldnames = ['time', 'flex_voltage', 'flex_angle', 'goniometer_angle']
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+            for data_point in self.recorded_data:
+                writer.writerow(data_point)
+        print(f"Dados salvos em {filename}")
+        self.data_filename = filename  # Salva o nome do arquivo para uso posterior
+
+    def show_results(self):
+        if not self.recorded_data:
+            print("Nenhum dado para mostrar.")
+            return
+
+        # Extrair dados
+        times = [d['time'] for d in self.recorded_data]
+        flex_voltages = [d['flex_voltage'] for d in self.recorded_data]
+        flex_angles = [d['flex_angle'] for d in self.recorded_data]
+        goniometer_angles = [d['goniometer_angle'] for d in self.recorded_data]
+
+        # Calcular métricas
+        flex_array = np.array(flex_angles)
+        goniometer_array = np.array(goniometer_angles)
+        mae = np.mean(np.abs(flex_array - goniometer_array))
+        rmse = np.sqrt(np.mean((flex_array - goniometer_array) ** 2))
+        pearson_corr = np.corrcoef(flex_array, goniometer_array)[0, 1]
+        # Correlação cruzada
+        cross_corr = np.correlate(
+            flex_array - np.mean(flex_array),
+            goniometer_array - np.mean(goniometer_array),
+            mode='full'
+        )
+        max_cross_corr = np.max(cross_corr)
+
+        # Janela para resultados
+        result_window = ctk.CTkToplevel(self.test_window)
+        result_window.title("Resultados do Teste")
+
+        # Configurar a janela para tela cheia
+        result_window.state('zoomed')
+
+        # Exibir métricas
+        metrics_text = f"""Métricas:
+MAE: {mae:.2f}
+RMSE: {rmse:.2f}
+Correlação de Pearson: {pearson_corr:.2f}
+Correlação Cruzada (máximo): {max_cross_corr:.2f}
+"""
+        metrics_label = ctk.CTkLabel(result_window, text=metrics_text, font=("Arial", 14))
+        metrics_label.pack(pady=10)
+
+        # Criar frames para organização dos gráficos
+        plots_frame = ctk.CTkFrame(result_window)
+        plots_frame.pack(fill='both', expand=True)
+
+        # Criar a figura do Matplotlib
+        fig = Figure(figsize=(12, 6), dpi=100)
+
+        # Gráfico 1: Ângulo do flex sensor vs Tensão do flex sensor
+        ax1 = fig.add_subplot(1, 2, 1)
+        ax1.plot(flex_voltages, flex_angles, '.', label='Ângulo vs Tensão')
+        ax1.set_title('Ângulo do Flex Sensor vs Tensão')
+        ax1.set_xlabel('Tensão (V)')
+        ax1.set_ylabel('Ângulo (°)')
+        ax1.legend()
+        ax1.grid(True)
+
+        # Gráfico 2: Ângulo do flex sensor e Ângulo do goniômetro vs Tempo
+        ax2 = fig.add_subplot(1, 2, 2)
+        ax2.plot(times, flex_angles, label='Ângulo Flex Sensor')
+        ax2.plot(times, goniometer_angles, label='Ângulo Goniômetro')
+        ax2.set_title('Ângulo do Flex Sensor e Goniômetro vs Tempo')
+        ax2.set_xlabel('Tempo (s)')
+        ax2.set_ylabel('Ângulo (°)')
+        ax2.legend()
+        ax2.grid(True)
+
+        # Adicionar a figura ao canvas do Tkinter
+        canvas = FigureCanvasTkAgg(fig, master=plots_frame)
+        canvas.get_tk_widget().pack(fill='both', expand=True)
+        canvas.draw()
+
+        # Botão para fechar a janela de resultados
+        close_button = ctk.CTkButton(result_window, text="Fechar", command=result_window.destroy)
+        close_button.pack(pady=10)
+
+
+
+
+
+
+
+
+
+# Código do arquivo: C:/Users/Alex Martins/Desktop/FEI/Mestrado FEI/Pesquisa/Software, Firmware/Software Marms/Software_V2.6 - FSR Sensors\Modules\__init__.py
+
+# Modules/__init__.py
+from .ble_manager import *
+from .calibration_manager import *
+from .goniometer_manager import *
+from .plot_manager import *
+from .sensor_data import *
+from .tests import *
+from .gui_manager import *
+from .fsr_calibrador import FSRCalibrador
+
+

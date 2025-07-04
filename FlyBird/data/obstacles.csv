@@ -1,0 +1,7 @@
+type,filename,x,y,bottom
+wood,wood_1.png,1000,500,False
+wood,wood_1.png,1500,-200,False
+wood,wood_1.png,2000,500,False
+wood,wood_1.png,2500,-200,False
+wood,wood_1.png,3000,500,False
+wood,wood_1.png,3500,-200,False

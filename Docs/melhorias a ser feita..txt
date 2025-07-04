@@ -1,0 +1,29 @@
+- movimentos do pássaro não estão suaves. ele deveria ir suavemente para a posição do sensor, ao invés disso está dando trancos para ângulo atual. 
+
+- o limite de graus deve corresponder ao limite superior da tela.
+enquando que os 270 deve corresponder ao limite inferior. 
+
+-Ao rodar o código pela primeira vez, eu gostaria que ele já calibrasse cada sensores automaticamente  com base nos dados da ultima calibração, sem que eu precise clicar em calibrar. A não ser que não exista arquivo de calibração. Mas se eu quiser calibrar novamente, ele deve eliminar os dados antigos de calibração, e calibrar novamente. 
+
+
+-O código deve funcionar mesmo sem a DLL do goniômetro disponível. Pois o goniômetro deve ser usado apenas para calibrar, depois não precisa mais ser usado. 
+
+Ainda precisa ter o biometric software aberto, corrigir isso.
+
+mas sem a dll o botão de calibração não deve funcionar. Tem que aparecer uma msg dizendo para conectar o goniômetro.
+
+talvez ter uma aba de develpment mode mostrando os plots necessários.
+
+
+-Quando eu clico no botão para jogar ele abre a janela perfeitamente, está tudo certo, mas quando eu fecho e clico novamente em jogar, não está abrindo novamente. 
+
+
+
+
+problemas para conexão bluetooth. ele sempre não conecta da primeira vez.
+deveria ter algo para estabelecer a conexão na própria tela. 
+alguma janela que mostre se conectou, se não conectou, tentar novamente. 
+
+
+
+C:\Users\Alex Martins\Desktop\FEI\Mestrado FEI\Pesquisa\Software, Firmware\Software Marms\19112024_Software_V2.3 - Integrando Jogo com Sensores
