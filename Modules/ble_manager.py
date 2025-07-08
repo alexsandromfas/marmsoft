@@ -1,10 +1,13 @@
-# Modules/ble_manager.py
+"""Wrapper around ``BleakClient`` for handling notifications."""
 
 from bleak import BleakClient
 import asyncio
 
 class BLEManager:
+    """Manage a BLE connection in a background asyncio loop."""
+
     def __init__(self, address, characteristic_uuid, notification_handler):
+        """Initialize a new BLE manager instance."""
         self.address = address
         self.characteristic_uuid = characteristic_uuid
         self.notification_handler = notification_handler
@@ -13,6 +16,7 @@ class BLEManager:
         self.is_running = False
 
     async def connect(self):
+        """Establish the BLE connection and start notifications."""
         print(f"Tentando conectar ao dispositivo: {self.address}")
         async with BleakClient(self.address) as client:
             self.client = client
@@ -26,6 +30,7 @@ class BLEManager:
                 print(f"Erro na conexão BLE: {e}")
 
     def start_loop(self):
+        """Run :meth:`connect` inside a dedicated event loop."""
         self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.loop)
         try:
@@ -36,6 +41,7 @@ class BLEManager:
             self.loop.close()
 
     def stop_loop(self):
+        """Signal the BLE loop to stop."""
         self.is_running = False
         if self.loop and self.loop.is_running():
             self.loop.call_soon_threadsafe(self.loop.stop)

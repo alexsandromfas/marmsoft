@@ -1,4 +1,4 @@
-# modules/game.py
+"""Arcade style game controlled by flex sensor input."""
 
 import pygame
 import random
@@ -11,7 +11,16 @@ from FlyBird.modules.input_handler import get_input
 from FlyBird.modules.screens import Screens
 
 class Game:
-    def __init__(self,sensor_data_provider=None):
+    """Main game class handling state, events and rendering."""
+
+    def __init__(self, sensor_data_provider=None):
+        """Initialize pygame and load assets.
+
+        Parameters
+        ----------
+        sensor_data_provider : Callable[[], float], optional
+            Function returning the current flex sensor angle.
+        """
         pygame.init()
         self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
         pygame.display.set_caption("FlyBird")
@@ -30,6 +39,7 @@ class Game:
 
 
     def load_data(self):
+        """Load images and obstacle data from disk."""
         # Load images
         self.background = pygame.image.load(os.path.join(ASSETS_DIR, "Background", "background.png")).convert()
         self.cloud_images = load_images_from_folder(NUVENS_DIR)
@@ -54,13 +64,13 @@ class Game:
 
 
     def new(self):
-        # Set up a new game
+        """Reset game state for a new round."""
         self.reset()  # Reset game variables
         print("New game started.")
 
 
     def run(self):
-        # Game Loop
+        """Main game loop."""
         while self.running and not self.game_over:
             self.clock.tick(FPS)
             self.events()
@@ -68,13 +78,13 @@ class Game:
             self.draw()
 
     def events(self):
-        # Handle events
+        """Process pending pygame events."""
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 self.running = False
 
     def update(self):
-        # Update game
+        """Update sprites and check for collisions."""
         keys_pressed = pygame.key.get_pressed()
         self.bird.update(keys_pressed)
         self.bird.check_invincibility()
@@ -104,7 +114,7 @@ class Game:
 
 
     def draw(self):
-        # Draw everything
+        """Render all game elements to the screen."""
         self.screen.blit(self.background, (0, 0))
         self.clouds.draw(self.screen)
         self.bird.draw(self.screen)
@@ -120,7 +130,7 @@ class Game:
     
     
     def get_player_info(self, new_player=True):
-        # Get player's name and finger choice
+        """Prompt for the player's name and finger."""
         self.screen.fill(BLACK)
         font_small = pygame.font.Font(None, 36)
         name_prompt = font_small.render("Digite seu nome:", True, WHITE)
@@ -215,6 +225,7 @@ class Game:
 
 
     def reset(self):
+        """Reset sprites and reload obstacles."""
         self.game_over = False
         self.bird.lives = INITIAL_LIVES
         self.bird.rect.center = (WIDTH // 2 - 50, HEIGHT // 2)
@@ -237,6 +248,7 @@ class Game:
 
     
     def save_results(self):
+        """Append the player's session results to ``results.csv``."""
         # Save player's performance to CSV
         if not os.path.exists(DATA_DIR):
             os.makedirs(DATA_DIR)
@@ -263,6 +275,7 @@ class Game:
         print("Resultados Salvos!")
 
     def play_again(self):
+        """Start a new game using the same player."""
         self.reset()
         self.screens.get_finger_choice()
         if self.running:
@@ -270,6 +283,7 @@ class Game:
 
 
     def change_patient(self):
+        """Reset game data and prompt for a new player."""
         self.reset()
         self.player_name = ''
         self.selected_finger = ''
@@ -283,4 +297,5 @@ class Game:
 
 
     def quit_game(self):
+        """Exit the game loop."""
         self.running = False

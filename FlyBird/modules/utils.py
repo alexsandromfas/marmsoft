@@ -1,4 +1,4 @@
-# modules/utils.py
+"""Helper functions for asset loading and sprite generation."""
 
 import pygame
 import os
@@ -7,12 +7,14 @@ from FlyBird.modules.settings import *
 import csv
 
 def extract_number(filename):
+    """Return the first integer found in ``filename``."""
     try:
         return int("".join(filter(str.isdigit, filename)))
     except ValueError:
         return 0
     
 def load_obstacles_from_csv():
+    """Load obstacle definitions from ``obstacles.csv``."""
     obstacles = []
     csv_file = os.path.join(DATA_DIR, 'obstacles.csv')
     if not os.path.exists(csv_file):
@@ -52,6 +54,7 @@ def load_obstacles_from_csv():
 
 
 def remove_background_with_tolerance(surface, base_color, tolerance):
+    """Make all pixels within ``tolerance`` of ``base_color`` transparent."""
     surface = surface.copy()
     surface.lock()
     width, height = surface.get_size()
@@ -64,6 +67,7 @@ def remove_background_with_tolerance(surface, base_color, tolerance):
     return surface
 
 def load_images_from_folder(folder, scale_factor=1.0, remove_bg=False, base_color=(0, 255, 0)):
+    """Load and optionally scale/clean all PNG images in ``folder``."""
     images = []
     for file in sorted(os.listdir(folder), key=extract_number):
         if file.endswith(".png"):
@@ -81,6 +85,7 @@ def load_images_from_folder(folder, scale_factor=1.0, remove_bg=False, base_colo
     return images
 
 def generate_clouds(cloud_images):
+    """Create initial cloud sprite data from ``cloud_images``."""
     clouds = []
     for _ in range(10):
         img = random.choice(cloud_images)
@@ -120,6 +125,7 @@ def generate_clouds(cloud_images):
 #     return woods
 
 def generate_woods():
+    """Generate wood obstacle dictionaries from the CSV file."""
     woods = []
     obstacles = load_obstacles_from_csv()
     for obstacle_data in obstacles:

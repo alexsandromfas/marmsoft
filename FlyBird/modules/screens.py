@@ -1,4 +1,4 @@
-# modules/screens.py
+"""Helper screens for menu prompts and game over display."""
 
 import pygame
 from FlyBird.modules.settings import *
@@ -6,13 +6,17 @@ from FlyBird.modules.utils import *
 from FlyBird.modules.game import *
 
 class Screens:
+    """Collection of simple UI screens used by :class:`Game`."""
+
     def __init__(self, game):
+        """Store references to the main :class:`Game` object."""
         self.game = game
         self.screen = game.screen
         self.clock = game.clock
         self.font = game.font
 
     def show_start_screen(self):
+        """Display the initial title and wait for ENTER."""
         self.screen.fill(BLACK)
         font_large = pygame.font.Font(None, 72)
         title_text = font_large.render("FlyBird", True, WHITE)
@@ -38,6 +42,7 @@ class Screens:
 
 
     def show_go_screen(self):
+        """Display score information and allow the player to choose an action."""
         # Calculate score and amplitudes
         obstacles_passed = self.game.bird.obstacles_passed
         if self.game.bird.amplitudes:
@@ -106,6 +111,7 @@ class Screens:
 
     
     def get_player_name(self):
+        """Prompt the player to enter their name."""
         font_small = pygame.font.Font(None, 36)
         name_prompt = font_small.render("Digite seu nome:", True, WHITE)
         input_box = pygame.Rect(WIDTH // 2 - 150, HEIGHT // 2 - 20, 300, 40)
@@ -169,6 +175,7 @@ class Screens:
 
 
     def get_finger_choice(self):
+        """Let the player choose which finger to exercise."""
         font_small = pygame.font.Font(None, 36)
         finger_prompt = font_small.render("Escolha o dedo para exercitar:", True, WHITE)
 

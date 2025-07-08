@@ -1,6 +1,7 @@
-# modules/input_handler.py
+"""Abstraction layer for future sensor based controls."""
+
 
 def get_input():
+    """Return current control input (not yet implemented)."""
     # Placeholder for future flex sensor input
-    # For now, we use keyboard input in the game loop directly
     pass

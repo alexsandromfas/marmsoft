@@ -1,3 +1,11 @@
+"""Graphical interface manager for sensor visualization and calibration.
+
+This module defines :class:`GUIManager`, responsible for orchestrating the
+CustomTkinter based interface used in the application.  It handles BLE
+connections, goniometer data acquisition and provides access to calibration
+and test tools.
+"""
+
 import customtkinter as ctk
 import threading
 import time
@@ -14,7 +22,31 @@ import tkinter as tk
 CHARACTERISTIC_UUID = "abcdef01-1234-5678-1234-56789abcdef0"
 
 class GUIManager:
+    """Manage the graphical user interface and sensor interactions.
+
+    Parameters
+    ----------
+    root : tkinter.Tk
+        Root window for all widgets.
+    sensors : dict
+        Mapping of sensor identifiers to :class:`SensorData` instances.
+    latest_readings : dict
+        Dictionary where the latest processed sensor values are stored.
+    """
+
     def __init__(self, root, sensors, latest_readings):
+        """Initialize the GUI manager with sensor mappings.
+
+        Parameters
+        ----------
+        root : tkinter.Tk
+            Main application window.
+        sensors : dict
+            Dictionary of sensors keyed by identifier.
+        latest_readings : dict
+            Shared dictionary storing the latest sensor values.
+        """
+
         self.root = root
         self.sensors = sensors
         self.latest_readings = latest_readings
@@ -44,6 +76,7 @@ class GUIManager:
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
     def setup_ui(self):
+        """Create menu bar, plotting widgets and calibration options."""
         self.menu_bar = tk.Menu(self.root)
         self.root.config(menu=self.menu_bar)
 
@@ -84,6 +117,7 @@ class GUIManager:
         self.setup_controls()
 
     def setup_controls(self):
+        """Add buttons and sensor selection check boxes to the GUI."""
         self.frame_controls = ctk.CTkFrame(self.main_frame, width=300)
         self.frame_controls.pack(side="right", fill="y")
 
@@ -146,6 +180,7 @@ class GUIManager:
         smoothing_slider.pack(pady=10)
 
     def toggle_visualizacao_frame(self):
+        """Show or hide the sensor selection frame."""
         if self.visualizacao_frame_open:
             self.visualizacao_frame.pack_forget()
             self.visualizacao_frame_open = False
@@ -156,10 +191,12 @@ class GUIManager:
             self.visualizacao_button.configure(fg_color="gray30")
 
     def change_appearance_mode(self, *args):
+        """Switch between dark and light UI themes."""
         mode = self.appearance_mode.get()
         ctk.set_appearance_mode(mode)
 
     def open_bluetooth_window(self):
+        """Display a window listing available Bluetooth devices."""
         self.bluetooth_window = ctk.CTkToplevel(self.root)
         self.bluetooth_window.title("Dispositivos Bluetooth")
         self.bluetooth_window.geometry("400x300")
@@ -181,6 +218,7 @@ class GUIManager:
         self.scan_devices()
 
     def scan_devices(self):
+        """Populate the Bluetooth window with discovered devices."""
         async def discover():
             from bleak import BleakScanner
             devices = await BleakScanner.discover()
@@ -200,6 +238,7 @@ class GUIManager:
         threading.Thread(target=run_discover).start()
 
     def connect_device(self):
+        """Connect to the Bluetooth device selected in the list box."""
         selection = self.devices_listbox.curselection()
         if selection:
             idx = selection[0]
@@ -209,6 +248,7 @@ class GUIManager:
             self.bluetooth_window.destroy()
 
     def start_ble(self, device_address):
+        """Start the BLE manager thread for the given device."""
         if self.ble_manager is not None:
             self.ble_manager.stop_loop()
         self.ble_manager = BLEManager(device_address, CHARACTERISTIC_UUID, self.notification_handler)
@@ -238,6 +278,7 @@ class GUIManager:
 
 
     def notification_handler(self, sender, data):
+        """Process BLE notifications and update sensor readings."""
         decoded_data = data.decode("utf-8")
         try:
             values = decoded_data.split(", ")
@@ -263,14 +304,17 @@ class GUIManager:
 
 
     def clear_data(self):
+        """Clear all data from the plots."""
         self.plot_manager.clear()
 
     def adjust_smoothing(self, value):
+        """Change the low pass filter constant for all sensors."""
         for sensor in self.sensors.values():
             sensor.alpha = float(value)
         print(f"Nível de suavização ajustado para: {value}")
 
     def open_game(self):
+        """Launch the FlyBird mini-game in a separate thread."""
         import threading
         from FlyBird.main_fb import main_fb
         def run_game():
@@ -278,13 +322,16 @@ class GUIManager:
         threading.Thread(target=run_game, daemon=True).start()
 
     def get_flex_angle(self, sensor_id):
+        """Return the latest angle for a flex sensor."""
         return self.latest_readings.get(f'{sensor_id}_angle', 0.0)
 
     def open_tests(self):
+        """Open the testing window for the flex sensors."""
         tests = Tests(self.root, sensors=self.sensors, latest_readings=self.latest_readings, goniometer=self.goniometer)
         tests.open_tests_window()
 
     def update_gui(self):
+        """Refresh plots and schedule the next GUI update."""
         if not self.is_paused:
             current_time = time.time()
             if self.goniometer.dll:
@@ -298,6 +345,7 @@ class GUIManager:
         self.root.after(10, self.update_gui)
 
     def on_closing(self):
+        """Handle application shutdown and resource cleanup."""
         if self.goniometer.dll:
             self.goniometer.stop_reading()
         if self.ble_manager is not None:
@@ -305,6 +353,7 @@ class GUIManager:
         self.root.destroy()
 
     def update_displayed_sensors(self):
+        """Update which sensors are visible on the plots."""
         chosen_sensors = set()
         for sensor_id, var in self.sensor_vars.items():
             if var.get():

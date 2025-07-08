@@ -1,4 +1,4 @@
-# Modules/calibration_manager.py
+"""User interface for recording calibration data for sensors."""
 
 import customtkinter as ctk
 import threading
@@ -6,12 +6,16 @@ import csv
 import time
 
 class CalibrationManager:
+    """Provide windows for creating and applying calibration curves."""
+
     def __init__(self, root, sensors, latest_readings):
+        """Store references to widgets and sensor objects."""
         self.root = root
         self.sensors = sensors
         self.latest_readings = latest_readings
 
     def open_calibration_window(self, sensor_name):
+        """Open a recording window for ``sensor_name``."""
         sensor = self.sensors[sensor_name]
 
         is_recording = False

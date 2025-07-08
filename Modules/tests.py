@@ -1,3 +1,5 @@
+"""Tkinter tools for recording and analysing flex sensor tests."""
+
 import customtkinter as ctk
 import threading
 import time
@@ -8,7 +10,22 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import numpy as np
 
 class Tests:
+    """Provide a UI for collecting calibration and comparison metrics."""
+
     def __init__(self, root, sensors, latest_readings, goniometer):
+        """Create the tests window manager.
+
+        Parameters
+        ----------
+        root : tkinter.Tk
+            Parent window.
+        sensors : dict
+            Mapping of sensor identifiers to :class:`SensorData` objects.
+        latest_readings : dict
+            Shared dictionary where latest values are stored.
+        goniometer : GoniometerManager
+            Instance used to retrieve angle references.
+        """
         self.root = root
         self.sensors = sensors
         self.latest_readings = latest_readings
@@ -20,6 +37,7 @@ class Tests:
         self.sample_count = 0
 
     def open_tests_window(self):
+        """Create and display the sensor testing window."""
         self.test_window = ctk.CTkToplevel(self.root)
         self.test_window.title("Testes dos Flex Sensors")
 
@@ -38,6 +56,7 @@ class Tests:
             sensor_button.pack(pady=5)
 
     def select_sensor(self, sensor_name):
+        """Prepare the interface to record data for ``sensor_name``."""
         # Limpa a interface atual
         for widget in self.main_frame.winfo_children():
             widget.destroy()
@@ -69,6 +88,7 @@ class Tests:
         self.update_timer()
 
     def start_recording(self):
+        """Begin collecting sensor data until ``stop_recording`` is called."""
         if not self.is_recording:
             self.is_recording = True
             self.record_button.configure(state="disabled")
@@ -79,6 +99,7 @@ class Tests:
             self.record_data()
 
     def stop_recording(self):
+        """Finish the current recording session and save the data."""
         if self.is_recording:
             self.is_recording = False
             self.record_button.configure(state="normal")
@@ -87,6 +108,7 @@ class Tests:
             self.save_data_to_csv()
 
     def record_data(self):
+        """Append a single sample of sensor and goniometer data."""
         if self.is_recording:
             current_time = time.time() - self.start_time
             flex_voltage = self.latest_readings[f"{self.selected_sensor}_voltage"]
@@ -103,6 +125,7 @@ class Tests:
             self.main_frame.after(50, self.record_data)  # Ajuste o intervalo conforme necessário
 
     def update_timer(self):
+        """Update time and sample counters during recording."""
         if self.is_recording:
             elapsed_time = time.time() - self.start_time
             self.time_label.configure(text=f"Tempo: {elapsed_time:.2f} s")
@@ -110,6 +133,7 @@ class Tests:
         self.main_frame.after(100, self.update_timer)
 
     def save_data_to_csv(self):
+        """Persist recorded data to a CSV file in ``data_tests``."""
         # Criar diretório de dados se não existir
         data_dir = 'data_tests'
         if not os.path.exists(data_dir):
@@ -125,6 +149,7 @@ class Tests:
         self.data_filename = filename  # Salva o nome do arquivo para uso posterior
 
     def show_results(self):
+        """Display plots and metrics calculated from the recorded data."""
         if not self.recorded_data:
             print("Nenhum dado para mostrar.")
             return
