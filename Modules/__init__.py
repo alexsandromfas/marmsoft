@@ -1,4 +1,5 @@
-# Modules/__init__.py
+"""Convenience imports for the :mod:`Modules` package."""
+
 from .ble_manager import *
 from .calibration_manager import *
 from .goniometer_manager import *

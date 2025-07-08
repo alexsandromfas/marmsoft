@@ -1,4 +1,4 @@
-# modules/settings.py
+"""Global constants used throughout the FlyBird game."""
 
 import os
 

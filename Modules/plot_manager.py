@@ -1,4 +1,4 @@
-# Modules/plot_manager.py
+"""Utilities for plotting sensor data in real time."""
 
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
@@ -6,7 +6,22 @@ from collections import deque
 import matplotlib.pyplot as plt
 
 class PlotManager:
+    """Manage Matplotlib figures showing sensor values."""
+
     def __init__(self, parent, time_window=10, sensors=None, displayed_sensors=None):
+        """Create plots bound to ``parent``.
+
+        Parameters
+        ----------
+        parent : tkinter widget
+            Widget where the Matplotlib canvas will be placed.
+        time_window : int, optional
+            Time range (seconds) to display.
+        sensors : dict, optional
+            Mapping of sensor identifiers to :class:`SensorData`.
+        displayed_sensors : set[str], optional
+            Subset of ``sensors`` currently shown.
+        """
         self.time_window = time_window
         self.sensors = sensors
         self.displayed_sensors = displayed_sensors if displayed_sensors is not None else set(sensors.keys())
@@ -64,15 +79,18 @@ class PlotManager:
         self.canvas.draw()
 
     def set_mode(self, mode):
+        """Switch between ``flex`` and ``fsr`` display modes."""
         self.plot_mode = mode
 
     def set_flex_mode_labels(self):
+        """Configure axis labels for flex sensor plotting."""
         self.ax_detail.set_title("Ângulo (°) x Tempo")
         self.ax_detail.set_xlabel("Tempo (s)")
         self.ax_detail.set_ylabel("Ângulo (°)")
         self.ax_detail.set_ylim(-10, 300)
 
     def set_fsr_mode_labels(self):
+        """Configure axis labels for FSR plotting."""
         self.ax_detail.set_title("Força x Tempo")
         self.ax_detail.set_xlabel("Tempo (s)")
         self.ax_detail.set_ylabel("Força (kgf)")
@@ -81,6 +99,7 @@ class PlotManager:
         # Ajuste dinâmico no update
 
     def update(self, current_time, latest_readings):
+        """Update all plot lines with the latest sensor values."""
         # Armazenar dados
         self.time_history.append(current_time)
         for sid in self.sensors.keys():
@@ -192,6 +211,7 @@ class PlotManager:
         self.canvas.draw()
 
     def clear(self):
+        """Remove all stored history and reset the plots."""
         self.time_history.clear()
         for sid in self.sensors.keys():
             self.voltage_histories[sid].clear()
@@ -213,4 +233,5 @@ class PlotManager:
         self.canvas.draw()
 
     def update_displayed_sensors(self, displayed_sensors):
+        """Change which sensors are currently plotted."""
         self.displayed_sensors = displayed_sensors

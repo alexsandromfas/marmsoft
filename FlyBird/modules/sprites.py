@@ -1,4 +1,4 @@
-# modules/sprites.py
+"""Sprite classes for the FlyBird game."""
 
 import pygame
 import random
@@ -6,7 +6,18 @@ from FlyBird.modules.settings import *
 from FlyBird.modules.utils import remove_background_with_tolerance
 
 class Bird(pygame.sprite.Sprite):
+    """Player controlled bird sprite."""
+
     def __init__(self, frames, sensor_data_provider=None):
+        """Create the bird.
+
+        Parameters
+        ----------
+        frames : list[Surface]
+            Animation frames for the bird.
+        sensor_data_provider : Callable[[], float], optional
+            Function returning the current flex sensor angle.
+        """
         super().__init__()
         self.frames = frames
         self.index = 0
@@ -31,6 +42,7 @@ class Bird(pygame.sprite.Sprite):
         angle = position_ratio * (FLEX_SENSOR_MAX - FLEX_SENSOR_MIN) + FLEX_SENSOR_MIN
         self.amplitudes.append((angle, angle))
     def update(self, keys_pressed):
+        """Update the bird position and animation."""
         current_time = pygame.time.get_ticks()
         if current_time - self.last_update > self.frame_rate:
             self.index = (self.index + 1) % len(self.frames)
@@ -136,6 +148,7 @@ class Bird(pygame.sprite.Sprite):
 
 
     def handle_collision(self):
+        """Make the bird temporarily invincible and reduce lives."""
         self.is_invincible = True
         self.invincible_start_time = pygame.time.get_ticks()
         self.lives -= 1
@@ -143,12 +156,14 @@ class Bird(pygame.sprite.Sprite):
 
 
     def check_invincibility(self):
+        """Disable invincibility after the set duration."""
         if self.is_invincible:
             current_time = pygame.time.get_ticks()
             if current_time - self.invincible_start_time > INVINCIBLE_DURATION:
                 self.is_invincible = False
 
     def draw(self, screen):
+        """Draw the sprite, blinking when invincible."""
         if self.is_invincible:
             current_time = pygame.time.get_ticks()
             if (current_time // BLINK_INTERVAL) % 2 == 0:
@@ -157,8 +172,9 @@ class Bird(pygame.sprite.Sprite):
             screen.blit(self.image, self.rect.topleft)
 
     def pass_obstacle(self):
-            self.obstacles_passed += 1
-            print(f"Obstacle passed! Total obstacles passed: {self.obstacles_passed}")
+        """Increment the obstacle counter."""
+        self.obstacles_passed += 1
+        print(f"Obstacle passed! Total obstacles passed: {self.obstacles_passed}")
 
 # class Wood(pygame.sprite.Sprite):
 #     def __init__(self, image, x, y, bottom):
@@ -176,7 +192,10 @@ class Bird(pygame.sprite.Sprite):
 #             self.rect.x = self.initial_x  # Reset to initial position
 #             self.passed = False
 class Wood(pygame.sprite.Sprite):
+    """Obstacle sprite representing a wood trunk."""
+
     def __init__(self, image, x, y, bottom):
+        """Create a wood obstacle at ``x, y``."""
         super().__init__()
         self.image = image
         self.rect = self.image.get_rect()
@@ -185,16 +204,21 @@ class Wood(pygame.sprite.Sprite):
         self.passed = False  # Para saber se o jogador já passou pelo tronco
 
     def update(self):
+        """Move the wood to the left and remove when off screen."""
         self.rect.x -= 3  # Velocidade fixa para mover à esquerda
         if self.rect.right < 0:  # Saiu da tela
             self.kill()  # Remove o sprite da lista de ativos (não reseta mais)
 
     def draw(self, screen):
+        """Blit the sprite image at its position."""
         screen.blit(self.image, self.rect.topleft)
 
 
 class Cloud(pygame.sprite.Sprite):
+    """Background cloud sprite."""
+
     def __init__(self, image, x, y, speed):
+        """Create a cloud image at ``x, y`` moving with ``speed``."""
         super().__init__()
         self.image = image
         self.rect = self.image.get_rect()
@@ -202,9 +226,11 @@ class Cloud(pygame.sprite.Sprite):
         self.speed = speed
 
     def update(self):
+        """Move the cloud across the screen."""
         self.rect.x -= self.speed
         if self.rect.right < 0:
             self.rect.left = WIDTH
 
     def draw(self, screen):
+        """Draw the cloud on ``screen``."""
         screen.blit(self.image, self.rect.topleft)

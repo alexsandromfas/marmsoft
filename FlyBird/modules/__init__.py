@@ -1,4 +1,4 @@
-# modules/__init__.py
+"""Expose commonly used FlyBird module classes and functions."""
 
 from FlyBird.modules.settings import *
 from FlyBird.modules.utils import *

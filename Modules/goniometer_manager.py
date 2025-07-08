@@ -1,4 +1,4 @@
-# Modules/goniometer_manager.py
+"""Interface with the Biometrics Ltd goniometer device."""
 
 import ctypes
 from ctypes import POINTER, byref, c_int
@@ -6,7 +6,18 @@ import threading
 import time
 
 class GoniometerManager:
+    """Handle asynchronous reading of a hardware goniometer."""
+
     def __init__(self, dll_path, channel=0):
+        """Create a new manager.
+
+        Parameters
+        ----------
+        dll_path : str
+            Path to the vendor DLL that provides the API.
+        channel : int, optional
+            Channel index used to read the goniometer.
+        """
         self.dll_path = dll_path
         self.channel = channel
         self.angle = 0
@@ -31,7 +42,7 @@ class GoniometerManager:
             self.dll = None  # Continua a execução mesmo se não conseguir carregar a DLL
 
     def start_reading(self):
-        """Inicia a leitura do goniômetro em uma thread separada."""
+        """Start reading the goniometer values in a background thread."""
         if self.running or not self.dll:
             return
         self.running = True
@@ -40,14 +51,14 @@ class GoniometerManager:
         self.thread.start()
 
     def stop_reading(self):
-        """Para a leitura do goniômetro."""
+        """Stop the reading thread and close the device connection."""
         if not self.dll:
             return
         self.running = False
         self.OnLineStatus(self.channel, self.OLI_ONLINE_STOP, None)
 
     def _read_data(self):
-        """Função que lê dados do goniômetro continuamente."""
+        """Continuously poll the device for angle data."""
         if not self.dll:
             return
         # Inicia a transferência
@@ -71,10 +82,10 @@ class GoniometerManager:
             self.stop_reading()
 
     def _converter_para_graus(self, valor_bruto):
-        """Converte o valor bruto do goniômetro para graus."""
+        """Convert a raw goniometer value to degrees."""
         valor_convertido = int((valor_bruto / 4000) * 180)
         return valor_convertido
 
     def get_angle(self):
-        """Retorna o último ângulo lido."""
+        """Return the most recently read angle."""
         return self.angle
