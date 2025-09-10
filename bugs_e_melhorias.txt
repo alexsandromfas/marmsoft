@@ -1,0 +1,66 @@
+# Bugs e Melhorias (Consolidado)
+
+## Bugs Relatados / Problemas Atuais
+- Jogo não reabre após fechar e tentar abrir novamente (possível estado não limpo / recursos não reinicializados).
+- Necessidade de manter Biometric Software aberto para funcionamento (dependência não tratada / fallback).
+- Conexão Bluetooth falha na primeira tentativa frequentemente (não há retry ou feedback ao usuário).
+- Botão de calibração deveria ficar inativo quando goniômetro não está presente, mas ainda permite interação.
+- Falta de feedback claro quando goniômetro não é detectado.
+- Possível sobrecarga de renderização/atualização devido a update GUI a cada 10ms sem desacoplamento de taxa de aquisição.
+
+## Débitos Técnicos
+- Mistura de responsabilidades (GUI, aquisição e lógica de calibração no mesmo fluxo).
+- Ausência de camada de serviço para sensores (observer / pub-sub).
+- Ausência de objeto de Sessão (metadados: paciente, mão, dedo, timestamp, versão calibração).
+- Uso de múltiplas janelas Toplevel em vez de navegação estruturada por frames/páginas.
+- Não há modo de simulação (demo) quando hardware está ausente.
+- Falta de histórico consolidado de calibrações e testes.
+
+## Melhorias de UX/UI Propostas
+1. Navegação por barra lateral fixa com seções: Dashboard, Sensores, Calibração, Testes, Jogo, Histórico, Configurações, Dev.
+2. Dashboard inicial com cards de status (BLE, Goniômetro, Calibração, Sessão, Logs recentes) + mini gráficos sparkline.
+3. Painel unificado de status persistente (ícones + tooltips + estado de conexão em tempo real).
+4. Separar atualização de aquisição (ex: 50 Hz) da taxa de render (15–20 Hz) para reduzir carga.
+5. Adicionar buffering circular de dados (deque) por sensor com tamanho configurável.
+6. Sensores agrupados visualmente; permitir ocultar/mostrar grupos e bloquear escala de gráficos.
+7. Calibração assistida em passos: Introdução → Posição neutra → Máxima flexão → Validação → Salvar curva.
+8. Auto-carregar calibração anterior se arquivos existirem; indicar badge "Estimado" se hardware ausente.
+9. Modo Testes com métricas em tempo real (MAE, RMSE, correlação parcial) antes do término.
+10. Relatório pós-teste exportável (CSV + JSON + opcional PDF) contendo metadados e snapshot da curva calibração.
+11. Histórico com filtro (data, sensor, paciente) + opção de replay de série temporal.
+12. Integração do jogo dentro da mesma janela (embed de canvas) sem abrir nova janela isolada.
+13. Pré-tela do jogo com configuração de dedo, sensibilidade e limites angulares interativos (slider + preview gauge).
+14. Implementar modo Demo (simula senóide / ruído controlado) se hardware ausente.
+15. Toast notifications leves para eventos (conectado, falha, calibração salva, export concluído).
+16. Logs estruturados em painel Dev (nível, timestamp, mensagem, origem) + filtro por nível.
+17. Internacionalização futura: camada de mensagens centralizada.
+18. Tema claro/escuro alternável + verificação de contraste mínimo (WCAG AA). 
+19. Componentes reutilizáveis: CardStatus, SensorPlot, MetricsPanel, SessionBar, NavigationSidebar.
+20. Bloqueio lógico de ações (ex: não iniciar teste sem calibração válida) com tooltip explicando a razão.
+21. Heatmap de atividade (flex vs tempo) como visão compacta por sessão.
+22. FSR mostrado como barras com alvo (faixa verde) e zona de saturação (vermelho) visualmente distinta.
+23. Goniômetro mostrado como gauge circular; fallback "N/D" quando indisponível.
+24. Persistência estruturada: data/sessions/<session_id>/{raw.csv, metrics.json, calibration_snapshot.json}.
+25. Botão rápido "Exportar sessão" no Dashboard.
+26. Introduzir smoothing configurável (EMA alpha) com preview antes de aplicar.
+27. Indicador de latência média de aquisição (ms) e perda de pacotes (se detectável).
+28. Tratamento de erros de BLE com retry exponencial e botão "Forçar nova varredura".
+29. Fila de tarefas (ex: exportar, recalibrar) com indicador de progresso.
+30. Assistente de primeiro uso (onboarding) destacando áreas principais.
+
+## Roadmap (Sugestão de Fases)
+Fase 1 (Infra + Layout): Sidebar, Dashboard básico, desacoplamento aquisição/render, camada Session.
+Fase 2 (Calibração & Testes): Fluxo guiado, métricas em tempo real, export estruturado.
+Fase 3 (Histórico & Relatórios): Persistência organizada, viewer de sessões, replay parcial.
+Fase 4 (Jogo Embutido + Config): Embedding, pré-config, múltiplos minigames.
+Fase 5 (Polimento & Acessibilidade): Tema, i18n base, contrastes, tooltips abrangentes.
+Fase 6 (Avançado Dev & Diagnóstico): Painel Dev, métricas de performance, simulação avançada.
+
+## Métricas de Sucesso (KPIs Sugestivos)
+- Tempo de início de sessão < 30s após abrir o app.
+- Zero tentativas inválidas (ações bloqueadas com feedback) em fluxo ideal.
+- Latência perceptível de atualização < 80ms.
+- Redução de falha de conexão BLE inicial > 70% via retry.
+- Retenção de configurações persistente entre execuções (tema, seleção de sensores).
+
+(Atualize este arquivo conforme novas observações surgirem.)

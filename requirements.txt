@@ -4,3 +4,4 @@ pygame
 bleak
 numpy
 matplotlib
+PyQt6
