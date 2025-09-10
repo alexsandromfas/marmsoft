@@ -1,5 +1,7 @@
 # Ignore Python cache directories
 __pycache__/
+# Ignore Python cache in Modules
+Modules/__pycache__/
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
