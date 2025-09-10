@@ -16,77 +16,63 @@ Objetivo: refinar layout (cantos arredondados, sombras, top bar custom, paleta c
 sem depender dos módulos reais ainda.
 Execute: python ui_prototipo.py
 """
+# ================== Imports & Modelos Básicos (restaurados) ==================
 from __future__ import annotations
-import sys
-import os
-from pathlib import Path
-import time
-import random
-import math
+
+import sys, os, math, time, random
 from dataclasses import dataclass, field
-from typing import List, Dict, Optional, Callable
+from typing import Dict, List, Optional, Callable
 
-from PyQt6.QtCore import (
-    Qt, QTimer, QSize, QAbstractTableModel, QModelIndex, QVariant
-)
-from PyQt6.QtGui import QColor, QPalette, QIcon, QPixmap, QPainter, QFont
+import numpy as np
+
+from PyQt6.QtCore import Qt, QTimer, QSize, QModelIndex, QVariant, QAbstractTableModel, QSortFilterProxyModel
+from PyQt6.QtGui import QColor, QIcon, QPixmap, QPainter, QFont, QPalette
 from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QListWidget, QListWidgetItem, QStackedWidget, QGridLayout, QFrame, QProgressBar,
-    QTableView, QFormLayout, QLineEdit, QSpinBox, QComboBox, QTextEdit,
-    QMessageBox, QCheckBox, QGraphicsDropShadowEffect, QToolButton
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
+    QTextEdit, QLabel, QFrame, QGraphicsDropShadowEffect, QToolButton, QCheckBox,
+    QProgressBar, QPushButton, QComboBox, QSpinBox, QFormLayout, QLineEdit,
+    QTableView, QListWidget, QListWidgetItem, QMessageBox, QStackedWidget
 )
 
-# Pygame embutido (minigames) usando uma superfície integrada (conceitual)
-import pygame
 
-try:
-    import numpy as np
-except ImportError:
-    class np:  # fallback mínimo
-        @staticmethod
-        def mean(arr):
-            return sum(arr)/len(arr) if arr else 0
-        @staticmethod
-        def sqrt(x):
-            return x ** 0.5
-        @staticmethod
-        def array(a):
-            return a
-        @staticmethod
-        def corrcoef(a, b):
-            return [[1, 0],[0,1]]
-
-# ------------------ Dados simulados ------------------
-SENSOR_NAMES_FLEX = [f"flex{i}" for i in range(1, 9)]
-SENSOR_NAMES_FSR = [f"fsr{i}" for i in range(1, 5)]
-
+# ------------------ Dataclasses ------------------
 @dataclass
 class SensorState:
     name: str
-    values: List[float] = field(default_factory=list)
     last_value: float = 0.0
-    enabled: bool = True
+    values: List[float] = field(default_factory=list)
 
 @dataclass
 class AppSession:
     id: str
     start_time: float
-    patient: str = "Paciente Demo"
-    notes: str = ""
-    calibration_version: str = "v1"
 
-# ------------------ Utilitário: garantir plugin Qt ------------------
+@dataclass
+class Patient:
+    id: str
+    nome: str
+    idade: int
+    sexo: str
+    condicao: str
+    fisio: str
+    registro_fisio: str
+
+
+# ------------------ Constantes / Mock ------------------
+SENSOR_NAMES_FLEX = [f"flex{i}" for i in range(1,9)]
+SENSOR_NAMES_FSR  = [f"fsr{i}" for i in range(1,5)]
+GONIOMETRO_NAME = "goniometro"
+
+MOCK_PATIENTS: List[Patient] = [
+    Patient("P001","Ana Silva",29,"F","Pós-operatório joelho","Dr. Souza","CREFITO 1234"),
+    Patient("P002","João Lima",41,"M","Reabilitação ombro","Dr. Souza","CREFITO 1234"),
+]
+
+
 def ensure_qt_platform():
-    try:
-        import PyQt6
-        qt_plugins = Path(PyQt6.__file__).parent / "Qt6" / "plugins"
-        platforms = qt_plugins / "platforms"
-        if platforms.exists():
-            cur = os.environ.get("QT_QPA_PLATFORM_PLUGIN_PATH")
-            if not cur or not Path(cur).exists() or "platforms" not in cur.lower():
-                os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = str(platforms)
-    except Exception:
+    # Em alguns ambientes Windows/CI pode ser necessário ajustar a plataforma.
+    if os.environ.get("QT_QPA_PLATFORM") in (None,""):
+        # Mantemos padrão; poderia forçar 'windows' ou 'offscreen' se preciso.
         pass
 
 # ------------------ Componentes reutilizáveis ------------------
@@ -161,43 +147,275 @@ class DashboardPage(QWidget):
         self.spark_flex = MiniSparkline(color="#7e57c2"); self.spark_fsr = MiniSparkline(color="#26c6da")
         spark_row.addWidget(self.spark_flex); spark_row.addWidget(self.spark_fsr)
         lay.addLayout(spark_row)
-        self.log_box = QTextEdit(); self.log_box.setReadOnly(True)
-        lbl = QLabel("LOGS RECENTES"); lbl.setProperty("class","section-title")
-        lay.addWidget(lbl); lay.addWidget(self.log_box); lay.addStretch()
+        lay.addStretch()
     def append_log(self, msg: str):
-        self.log_box.append(f"<span style='color:#6a7a89'>[{time.strftime('%H:%M:%S')}]</span> {msg}")
+        pass
 
 class SensorsPage(QWidget):
+    # Página de sensores com dois modos: Cartões ou Unificado.
+    # Agora com toggle segmentado, lista de seleção de sinais e sensor adicional goniômetro.
     def __init__(self, sensors: Dict[str, SensorState]):
         super().__init__(); self.sensors = sensors
-        lay = QVBoxLayout(self); lay.setSpacing(18)
-        header = QHBoxLayout(); lbl = QLabel("SENSORES ATIVOS"); lbl.setProperty("class","section-title")
-        header.addWidget(lbl); header.addStretch(); lay.addLayout(header)
+        self.mode = 'unificado'  # padrão agora é unificado
+        self.show_tensao = False
+        self.flex_hidden = False
+        self.fsr_hidden = False
+        # conjunto de nomes habilitados (para modo unificado)
+        self.enabled_names = set(sensors.keys())
+        main_lay = QVBoxLayout(self); main_lay.setSpacing(14)
+
+        # Header: Título + linha com toggle segmentado e opções
+        lbl = QLabel("SENSORES"); lbl.setProperty("class","section-title")
+        main_lay.addWidget(lbl)
+
+        seg_row = QHBoxLayout(); seg_row.setSpacing(12)
+        # Segmented control
+        self.segmented = QFrame(); self.segmented.setObjectName("Segmented")
+        seg_lay = QHBoxLayout(self.segmented); seg_lay.setContentsMargins(4,4,4,4); seg_lay.setSpacing(2)
+        self.btn_seg_unificado = QPushButton("Unificado"); self.btn_seg_cartoes = QPushButton("Cartões")
+        for b in (self.btn_seg_unificado, self.btn_seg_cartoes):
+            b.setCheckable(True)
+            b.clicked.connect(self._segmented_clicked)
+        self.btn_seg_unificado.setChecked(True)
+        self.btn_seg_unificado.setProperty("selected","true")
+        self.btn_seg_cartoes.setProperty("selected","false")
+        seg_lay.addWidget(self.btn_seg_unificado)
+        seg_lay.addWidget(self.btn_seg_cartoes)
+        seg_row.addWidget(self.segmented, 0, Qt.AlignmentFlag.AlignLeft)
+
+        # Checkbox tensão (apenas no unificado)
+        self.tensao_cb = QCheckBox("Mostrar Tensão"); self.tensao_cb.stateChanged.connect(self.toggle_tensao)
+        seg_row.addWidget(self.tensao_cb)
+        seg_row.addStretch()
+        main_lay.addLayout(seg_row)
+
+        from PyQt6.QtWidgets import QStackedWidget, QScrollArea
+        self.mode_stack = QStackedWidget(); main_lay.addWidget(self.mode_stack, 1)
+
+        # --- Página Cartões ---
+        page_cards = QWidget(); cards_lay = QVBoxLayout(page_cards); cards_lay.setSpacing(10)
+        # Filtros
         filter_row = QHBoxLayout(); filter_row.setSpacing(6)
         self.checks: Dict[str, QCheckBox] = {}
         for name in sensors.keys():
             cb = QCheckBox(name); cb.setChecked(True); cb.stateChanged.connect(self.update_visible)
             filter_row.addWidget(cb); self.checks[name]=cb
-        lay.addLayout(filter_row)
-        grid = QGridLayout(); grid.setSpacing(18)
+        filter_row.addStretch(); cards_lay.addLayout(filter_row)
+        # Grupos Flex / FSR
         self.plots: Dict[str, MiniSparkline] = {}
         palette_colors = ["#ffb74d","#29b6f6","#66bb6a","#ab47bc","#ef5350","#26c6da","#ffa726","#8d6e63"]
-        row=col=0
-        for i,name in enumerate(sensors.keys()):
-            spark = MiniSparkline(color=palette_colors[i % len(palette_colors)])
-            lab = QLabel(name.upper()); lab.setProperty("class","sensor-label")
+
+        def build_group(title: str, names: List[str]):
+            cards_lay.addWidget(QLabel(title))
+            grid = QGridLayout(); grid.setSpacing(18)
+            row=col=0
+            for i,name in enumerate(names):
+                spark = MiniSparkline(color=palette_colors[i % len(palette_colors)])
+                lab = QLabel(name.upper()); lab.setProperty("class","sensor-label")
+                card = QFrame(); card.setObjectName("SensorCard")
+                inner = QVBoxLayout(card); inner.setContentsMargins(12,12,12,12); inner.setSpacing(8)
+                inner.addWidget(lab); inner.addWidget(spark)
+                self.plots[name]=spark
+                grid.addWidget(card,row,col)
+                col+=1
+                if col>=4: col=0; row+=1
+            cards_lay.addLayout(grid)
+
+        build_group("Flex Sensors", [n for n in sensors if n.startswith('flex')])
+        build_group("FSR Sensors", [n for n in sensors if n.startswith('fsr')])
+        # Card separado goniômetro
+        if GONIOMETRO_NAME in sensors:
+            cards_lay.addWidget(QLabel("Goniômetro"))
+            ggrid = QGridLayout(); ggrid.setSpacing(18)
+            spark = MiniSparkline(color="#ffffff")
+            lab = QLabel("GONIÔMETRO"); lab.setProperty("class","sensor-label")
             card = QFrame(); card.setObjectName("SensorCard")
             inner = QVBoxLayout(card); inner.setContentsMargins(12,12,12,12); inner.setSpacing(8)
             inner.addWidget(lab); inner.addWidget(spark)
-            self.plots[name]=spark
-            grid.addWidget(card,row,col)
-            col+=1
-            if col>=4: col=0; row+=1
-        lay.addLayout(grid); lay.addStretch()
+            self.plots[GONIOMETRO_NAME] = spark
+            ggrid.addWidget(card,0,0)
+            cards_lay.addLayout(ggrid)
+        cards_lay.addStretch()
+        self.mode_stack.addWidget(page_cards)
+
+        # --- Página Unificada ---
+        page_uni = QWidget(); uni_outer = QVBoxLayout(page_uni); uni_outer.setSpacing(14)
+        # Scroll area (caso aumente)
+        scroll = QScrollArea(); scroll.setWidgetResizable(True)
+        sc_body = QWidget(); scroll_lay = QVBoxLayout(sc_body); scroll_lay.setSpacing(16)
+        scroll.setWidget(sc_body)
+
+        # Multi plot widgets
+        flex_names_unified = [n for n in sensors if n.startswith('flex')]
+        if GONIOMETRO_NAME in sensors:
+            flex_names_unified = flex_names_unified + [GONIOMETRO_NAME]
+        self.multi_flex = MultiSensorPlot(flex_names_unified, sensors, title="Flex / Goniômetro - Ângulo", color_seed="#7e57c2", enabled_names=self.enabled_names)
+        self.multi_flex_t = MultiSensorPlot(flex_names_unified, sensors, title="Flex / Goniômetro - Tensão", color_seed="#3949ab", enabled_names=self.enabled_names)
+        self.multi_fsr = MultiSensorPlot([n for n in sensors if n.startswith('fsr')], sensors, title="FSR - Ângulo", color_seed="#26c6da", enabled_names=self.enabled_names)
+        self.multi_fsr_t = MultiSensorPlot([n for n in sensors if n.startswith('fsr')], sensors, title="FSR - Tensão", color_seed="#00838f", enabled_names=self.enabled_names)
+
+        # Controles de ocultar
+        self.btn_hide_flex = QPushButton("Ocultar Flex")
+        self.btn_hide_flex.clicked.connect(self.toggle_flex_visible)
+        self.btn_hide_fsr = QPushButton("Ocultar FSR")
+        self.btn_hide_fsr.clicked.connect(self.toggle_fsr_visible)
+
+        block_flex = QVBoxLayout(); wrap_flex = QFrame(); wrap_flex.setObjectName("SensorCard"); wrap_flex.setLayout(block_flex)
+        ctl_flex = QHBoxLayout(); ctl_flex.addWidget(QLabel("Painel Flex")); ctl_flex.addStretch(); ctl_flex.addWidget(self.btn_hide_flex)
+        block_flex.addLayout(ctl_flex)
+        self.flex_pair = QHBoxLayout(); self.flex_pair.addWidget(self.multi_flex, 1)
+        self.flex_pair.addWidget(self.multi_flex_t, 1); self.multi_flex_t.setVisible(False)
+        block_flex.addLayout(self.flex_pair)
+
+        block_fsr = QVBoxLayout(); wrap_fsr = QFrame(); wrap_fsr.setObjectName("SensorCard"); wrap_fsr.setLayout(block_fsr)
+        ctl_fsr = QHBoxLayout(); ctl_fsr.addWidget(QLabel("Painel FSR")); ctl_fsr.addStretch(); ctl_fsr.addWidget(self.btn_hide_fsr)
+        block_fsr.addLayout(ctl_fsr)
+        self.fsr_pair = QHBoxLayout(); self.fsr_pair.addWidget(self.multi_fsr, 1)
+        self.fsr_pair.addWidget(self.multi_fsr_t, 1); self.multi_fsr_t.setVisible(False)
+        block_fsr.addLayout(self.fsr_pair)
+
+        # Checkboxes agora dentro de cada painel
+        self.unified_checks_flex: Dict[str, QCheckBox] = {}
+        self.unified_checks_fsr: Dict[str, QCheckBox] = {}
+        # Flex + goniômetro
+        flex_checks_wrap = QWidget(); flex_checks_lay = QHBoxLayout(flex_checks_wrap); flex_checks_lay.setContentsMargins(4,0,4,4); flex_checks_lay.setSpacing(8)
+        for name in flex_names_unified:
+            cb = QCheckBox(name); cb.setChecked(True); cb.stateChanged.connect(self.update_unified_enabled)
+            self.unified_checks_flex[name] = cb; flex_checks_lay.addWidget(cb)
+        flex_checks_lay.addStretch(); block_flex.addWidget(flex_checks_wrap)
+        # FSR
+        fsr_checks_wrap = QWidget(); fsr_checks_lay = QHBoxLayout(fsr_checks_wrap); fsr_checks_lay.setContentsMargins(4,0,4,4); fsr_checks_lay.setSpacing(8)
+        for name in [n for n in sensors if n.startswith('fsr')]:
+            cb = QCheckBox(name); cb.setChecked(True); cb.stateChanged.connect(self.update_unified_enabled)
+            self.unified_checks_fsr[name] = cb; fsr_checks_lay.addWidget(cb)
+        fsr_checks_lay.addStretch(); block_fsr.addWidget(fsr_checks_wrap)
+        scroll_lay.addWidget(wrap_flex)
+        scroll_lay.addWidget(wrap_fsr)
+        scroll_lay.addStretch()
+        uni_outer.addWidget(scroll)
+        self.mode_stack.addWidget(page_uni)
+        main_lay.addStretch()
+
+        # Definir índice inicial para modo unificado
+        self.mode_stack.setCurrentIndex(1)
+        self.tensao_cb.setVisible(True)
+
+    def toggle_mode(self):
+        # Usado se ainda houver chamadas externas
+        self._set_mode('unificado' if self.mode=='cartoes' else 'cartoes')
+
+    def toggle_tensao(self):
+        self.show_tensao = self.tensao_cb.isChecked()
+        self.multi_flex_t.setVisible(self.show_tensao)
+        self.multi_fsr_t.setVisible(self.show_tensao)
+        # Ajusta textos
+        self.multi_flex.title = "Flex - Ângulo" if not self.show_tensao else "Flex - Ângulo"
+        self.multi_fsr.title = "FSR - Ângulo" if not self.show_tensao else "FSR - Ângulo"
+        self.update()
+
+    def toggle_flex_visible(self):
+        self.flex_hidden = not self.flex_hidden
+        self.multi_flex.setVisible(not self.flex_hidden)
+        self.multi_flex_t.setVisible(not self.flex_hidden and self.show_tensao)
+        self.btn_hide_flex.setText("Mostrar Flex" if self.flex_hidden else "Ocultar Flex")
+
+    def toggle_fsr_visible(self):
+        self.fsr_hidden = not self.fsr_hidden
+        self.multi_fsr.setVisible(not self.fsr_hidden)
+        self.multi_fsr_t.setVisible(not self.fsr_hidden and self.show_tensao)
+        self.btn_hide_fsr.setText("Mostrar FSR" if self.fsr_hidden else "Ocultar FSR")
+
     def update_visible(self):
-        for name, cb in self.checks.items(): self.plots[name].setVisible(cb.isChecked())
+        for name, cb in self.checks.items():
+            if name in self.plots:
+                self.plots[name].setVisible(cb.isChecked())
+
     def push_value(self, name: str, v: float):
-        if name in self.plots: self.plots[name].push(v)
+        # Modo cartões
+        if name in self.plots:
+            self.plots[name].push(v)
+        # Modo unificado – as curvas acessam diretamente sensor state ao desenhar, então basta atualizar
+        if name.startswith('flex'):
+            self.multi_flex.update()
+            self.multi_flex_t.update()
+        elif name.startswith('fsr'):
+            self.multi_fsr.update()
+            self.multi_fsr_t.update()
+        else:  # goniômetro
+            self.multi_flex.update(); self.multi_flex_t.update()
+
+    def _segmented_clicked(self):
+        if self.sender() == self.btn_seg_unificado:
+            self._set_mode('unificado')
+        else:
+            self._set_mode('cartoes')
+
+    def _set_mode(self, target: str):
+        if target == self.mode:
+            return
+        self.mode = target
+        if self.mode == 'unificado':
+            self.mode_stack.setCurrentIndex(1)
+            self.tensao_cb.setVisible(True)
+            self.btn_seg_unificado.setChecked(True); self.btn_seg_cartoes.setChecked(False)
+            self.btn_seg_unificado.setProperty('selected','true'); self.btn_seg_cartoes.setProperty('selected','false')
+        else:
+            self.mode_stack.setCurrentIndex(0)
+            self.tensao_cb.setVisible(False)
+            self.btn_seg_unificado.setChecked(False); self.btn_seg_cartoes.setChecked(True)
+            self.btn_seg_unificado.setProperty('selected','false'); self.btn_seg_cartoes.setProperty('selected','true')
+        # Força reestilização dinâmica
+        for b in (self.btn_seg_unificado, self.btn_seg_cartoes):
+            b.style().unpolish(b); b.style().polish(b); b.update()
+        self.update()
+
+    def update_unified_enabled(self):
+        enabled_flex = {n for n, cb in self.unified_checks_flex.items() if cb.isChecked()}
+        enabled_fsr = {n for n, cb in self.unified_checks_fsr.items() if cb.isChecked()}
+        self.enabled_names = enabled_flex | enabled_fsr
+        self.multi_flex.update(); self.multi_flex_t.update(); self.multi_fsr.update(); self.multi_fsr_t.update()
+
+class MultiSensorPlot(QWidget):
+    # Plot multi-sensores simples com filtragem dinâmica por conjunto habilitado.
+    def __init__(self, names: List[str], sensors: Dict[str, SensorState], title: str, color_seed: str, enabled_names: Optional[set]=None):
+        super().__init__(); self.names = names; self.sensors = sensors; self.title = title; self.color_seed = color_seed; self.enabled_names_ref = enabled_names
+        self.setMinimumHeight(440)  # altura dobrada
+    def paintEvent(self, _):
+        if not self.names:
+            return
+        from PyQt6.QtGui import QPainter, QPen, QFont
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        rect = self.rect()
+        p.fillRect(rect, QColor(0,0,0,20))
+        ft = QFont(); ft.setPointSize(11); ft.setBold(True); p.setFont(ft)
+        p.setPen(QColor('#ffffff'))
+        p.drawText(14,20,self.title)
+        margin_l, margin_r, margin_t, margin_b = 50, 14, 30, 30
+        x0 = rect.left()+margin_l; y0 = rect.bottom()-margin_b
+        w = rect.width()-margin_l-margin_r; h = rect.height()-margin_t-margin_b
+        p.setPen(QPen(QColor(255,255,255,60),1))
+        p.drawRect(x0, rect.top()+margin_t, w, h)
+        base_colors = ["#ffb74d","#29b6f6","#66bb6a","#ab47bc","#ef5350","#26c6da","#ffa726","#8d6e63"]
+        visible_names = [n for n in self.names if (self.enabled_names_ref is None or n in self.enabled_names_ref)]
+        for idx, name in enumerate(visible_names):
+            data = self.sensors[name].values[-200:]
+            if not data:
+                continue
+            mx = max(data) or 1
+            pts = []
+            for i,val in enumerate(data):
+                x = x0 + int(i*(w/max(1,len(data)-1)))
+                y = y0 - int((val/mx)*(h-4))
+                pts.append((x,y))
+            pen = QPen(QColor(base_colors[idx % len(base_colors)]),2)
+            p.setPen(pen)
+            for i in range(1,len(pts)):
+                p.drawLine(pts[i-1][0], pts[i-1][1], pts[i][0], pts[i][1])
+            if pts:
+                p.setPen(QPen(QColor(base_colors[idx % len(base_colors)])))
+                p.drawText(pts[-1][0]-20, pts[-1][1]-6, name)
+
 
 class CalibrationPage(QWidget):
     def __init__(self):
@@ -361,6 +579,174 @@ class HistoryPage(QWidget):
         layout.addWidget(self.table)
         layout.addStretch()
 
+class PatientsTableModel(QAbstractTableModel):
+    headers = ["ID","Nome","Idade","Sexo","Condição","Fisioterapeuta","Registro"]
+    def __init__(self, patients: List[Patient]):
+        super().__init__(); self.patients = patients
+    def rowCount(self, parent=QModelIndex()): return len(self.patients)
+    def columnCount(self, parent=QModelIndex()): return len(self.headers)
+    def data(self, index, role=Qt.ItemDataRole.DisplayRole):
+        if not index.isValid(): return QVariant()
+        p = self.patients[index.row()]
+        if role == Qt.ItemDataRole.DisplayRole:
+            return [p.id,p.nome,str(p.idade),p.sexo,p.condicao,p.fisio,p.registro_fisio][index.column()]
+        return QVariant()
+    def headerData(self, section, orientation, role):
+        if role==Qt.ItemDataRole.DisplayRole and orientation==Qt.Orientation.Horizontal:
+            return self.headers[section]
+        return QVariant()
+    def patient_at(self, row: int) -> Optional[Patient]:
+        if 0 <= row < len(self.patients):
+            return self.patients[row]
+        return None
+
+class PatientsFilterProxy(QSortFilterProxyModel):
+    def __init__(self):
+        super().__init__()
+        self.filter_text = ""; self.fisio_filter = "Todos"; self.cond_filter = "Todos"; self.sexo_filter = "Todos"
+    def set_filters(self, text: str, fisio: str, cond: str, sexo: str):
+        self.filter_text = text.lower().strip()
+        self.fisio_filter = fisio
+        self.cond_filter = cond
+        self.sexo_filter = sexo
+        self.invalidateFilter()
+    def filterAcceptsRow(self, source_row: int, source_parent: QModelIndex) -> bool:
+        model: PatientsTableModel = self.sourceModel()  # type: ignore
+        p = model.patient_at(source_row)
+        if p is None: return False
+        # Texto livre: nome, condição, fisio, registro
+        if self.filter_text:
+            blob = f"{p.nome} {p.condicao} {p.fisio} {p.registro_fisio}".lower()
+            if self.filter_text not in blob:
+                return False
+        if self.fisio_filter != "Todos" and p.fisio != self.fisio_filter:
+            return False
+        if self.cond_filter != "Todos" and p.condicao != self.cond_filter:
+            return False
+        if self.sexo_filter != "Todos" and p.sexo != self.sexo_filter:
+            return False
+        return True
+
+class PatientsPage(QWidget):
+    def __init__(self, patients: List[Patient]):
+        super().__init__()
+        from PyQt6.QtWidgets import QHeaderView
+        self._patients = patients
+        lay = QVBoxLayout(self); lay.setSpacing(14)
+        title = QLabel("Pacientes"); title.setProperty("class","section-title"); lay.addWidget(title)
+
+        # Filtros / busca
+        filter_bar = QHBoxLayout(); filter_bar.setSpacing(8)
+        self.search_edit = QLineEdit(); self.search_edit.setPlaceholderText("Pesquisar nome, condição, fisio...")
+        self.cb_fisio = QComboBox(); fisios = sorted({p.fisio for p in patients}); self.cb_fisio.addItems(["Todos"] + fisios)
+        self.cb_cond = QComboBox(); conds = sorted({p.condicao for p in patients}); self.cb_cond.addItems(["Todos"] + conds)
+        self.cb_sexo = QComboBox(); sexos = sorted({p.sexo for p in patients}); self.cb_sexo.addItems(["Todos"] + sexos)
+        filter_bar.addWidget(QLabel("Buscar:")); filter_bar.addWidget(self.search_edit,1)
+        filter_bar.addWidget(QLabel("Fisio:")); filter_bar.addWidget(self.cb_fisio)
+        filter_bar.addWidget(QLabel("Condição:")); filter_bar.addWidget(self.cb_cond)
+        filter_bar.addWidget(QLabel("Sexo:")); filter_bar.addWidget(self.cb_sexo)
+        lay.addLayout(filter_bar)
+
+        # Tabela com proxy
+        self.model = PatientsTableModel(patients)
+        self.proxy = PatientsFilterProxy(); self.proxy.setSourceModel(self.model)
+        self.table = QTableView(); self.table.setModel(self.proxy)
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.table.setAlternatingRowColors(True)
+        self.table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QTableView.SelectionMode.SingleSelection)
+        lay.addWidget(self.table, 4)
+
+        # Painel de detalhes
+        self.detail_frame = QFrame(); self.detail_frame.setObjectName("SensorCard")
+        df_lay = QVBoxLayout(self.detail_frame); df_lay.setContentsMargins(16,16,16,16); df_lay.setSpacing(8)
+        self.detail_title = QLabel("Selecione um paciente"); self.detail_title.setProperty("class","sensor-label")
+        self.detail_info = QTextEdit(); self.detail_info.setReadOnly(True)
+        df_lay.addWidget(self.detail_title)
+        df_lay.addWidget(self.detail_info)
+        lay.addWidget(self.detail_frame, 2)
+
+        # Conexões
+        self.search_edit.textChanged.connect(self._apply_filters)
+        self.cb_fisio.currentTextChanged.connect(self._apply_filters)
+        self.cb_cond.currentTextChanged.connect(self._apply_filters)
+        self.cb_sexo.currentTextChanged.connect(self._apply_filters)
+        self.table.selectionModel().selectionChanged.connect(self._selection_changed)
+        self._apply_filters()
+
+    def _apply_filters(self):
+        self.proxy.set_filters(self.search_edit.text(), self.cb_fisio.currentText(), self.cb_cond.currentText(), self.cb_sexo.currentText())
+        # Limpa detalhe se item atual não passa mais no filtro
+        self._update_detail_from_selection()
+
+    def _selection_changed(self, *_):
+        self._update_detail_from_selection()
+
+    def _update_detail_from_selection(self):
+        indexes = self.table.selectionModel().selectedRows()
+        if not indexes:
+            self.detail_title.setText("Selecione um paciente")
+            self.detail_info.setPlainText("")
+            return
+        proxy_index = indexes[0]
+        source_index = self.proxy.mapToSource(proxy_index)
+        patient = self.model.patient_at(source_index.row())
+        if not patient:
+            return
+        self.detail_title.setText(f"{patient.nome} (ID: {patient.id})")
+        # Simulated history placeholder
+        history_placeholder = "\n".join([
+            "Histórico (demo):",
+            "- Sessão 01: Avaliação inicial",
+            "- Sessão 02: Exercícios de amplitude",
+            "- Sessão 03: Jogo de reabilitação"
+        ])
+        info = (
+            f"Nome: {patient.nome}\n"
+            f"Idade: {patient.idade}\n"
+            f"Sexo: {patient.sexo}\n"
+            f"Condição: {patient.condicao}\n"
+            f"Fisioterapeuta: {patient.fisio}\n"
+            f"Registro: {patient.registro_fisio}\n\n"
+            f"{history_placeholder}\n\nDescrição: (Adicionar notas clínicas aqui)"
+        )
+        self.detail_info.setPlainText(info)
+
+class StartupOverlay(QWidget):
+    # Overlay mostrado ao iniciar para entrada rápida de paciente/fisioterapeuta (somente frontend).
+    def __init__(self, parent: QWidget, on_continue: Callable[[str,str,str,str],None]):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setObjectName("StartupOverlay")
+        self.on_continue = on_continue
+        lay = QVBoxLayout(self); lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        card = QFrame(); card.setObjectName("SensorCard")
+        inner = QFormLayout(card); inner.setSpacing(12); inner.setContentsMargins(28,28,28,28)
+        self.ed_paciente = QLineEdit(); self.ed_paciente.setPlaceholderText("Nome do paciente")
+        self.ed_idade = QSpinBox(); self.ed_idade.setRange(1, 120); self.ed_idade.setValue(30)
+        self.cb_sexo = QComboBox(); self.cb_sexo.addItems(["F","M","Outro"]) 
+        self.ed_condicao = QLineEdit(); self.ed_condicao.setPlaceholderText("Condição / Observação")
+        self.ed_fisio = QLineEdit(); self.ed_fisio.setPlaceholderText("Fisioterapeuta")
+        self.ed_registro = QLineEdit(); self.ed_registro.setPlaceholderText("Registro Profissional")
+        inner.addRow("Paciente", self.ed_paciente)
+        inner.addRow("Idade", self.ed_idade)
+        inner.addRow("Sexo", self.cb_sexo)
+        inner.addRow("Condição", self.ed_condicao)
+        inner.addRow("Fisioterapeuta", self.ed_fisio)
+        inner.addRow("Registro", self.ed_registro)
+        btn = QPushButton("Continuar")
+        btn.clicked.connect(self._submit)
+        inner.addRow(btn)
+        lay.addWidget(card)
+    def _submit(self):
+        self.on_continue(
+            self.ed_paciente.text() or "Paciente Demo",
+            self.ed_fisio.text() or "Fisio Demo",
+            self.ed_condicao.text() or "--",
+            self.ed_registro.text() or "--"
+        )
+        self.hide()
+
 class SettingsPage(QWidget):
     def __init__(self, on_theme_change: Callable[[str], None]):
         super().__init__()
@@ -378,13 +764,49 @@ class SettingsPage(QWidget):
 class DevPage(QWidget):
     def __init__(self):
         super().__init__()
-        layout = QVBoxLayout(self)
+        layout = QVBoxLayout(self); layout.setSpacing(18)
+        title = QLabel("PAINEL DEV"); title.setProperty("class","section-title")
+        layout.addWidget(title)
+
+        # Card de Logs (estilo igual aos demais usando QFrame#SensorCard)
+        self.log_card = QFrame(); self.log_card.setObjectName("SensorCard")
+        card_lay = QVBoxLayout(self.log_card); card_lay.setSpacing(10); card_lay.setContentsMargins(18,16,18,16)
+        header = QHBoxLayout(); header.setSpacing(8)
+        lbl_logs = QLabel("LOGS RECENTES")
+        lbl_logs.setStyleSheet("font-weight:600; letter-spacing:0.5px;")
+        self.btn_clear = QPushButton("Limpar"); self.btn_clear.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_clear.setFixedHeight(26)
+        self.btn_clear.clicked.connect(self.clear_log)
+        header.addWidget(lbl_logs); header.addStretch(); header.addWidget(self.btn_clear)
+        card_lay.addLayout(header)
         self.log = QTextEdit(); self.log.setReadOnly(True)
-        layout.addWidget(QLabel("Painel de Diagnóstico"))
-        layout.addWidget(self.log)
+        self.log.setPlaceholderText("Logs recentes do sistema...")
+        self.log.setMinimumHeight(300)
+        card_lay.addWidget(self.log, 1)
+        layout.addWidget(self.log_card, 1)
         layout.addStretch()
+
+        self._max_lines = 500
+        self._with_timestamp = True
+
     def add_line(self, text: str):
-        self.log.append(text)
+        if self._with_timestamp:
+            ts = time.strftime('%H:%M:%S')
+            line = f"[{ts}] {text}"
+        else:
+            line = text
+        self.log.append(line)
+        # Limita quantidade de linhas para não crescer indefinidamente
+        cur = self.log.toPlainText().splitlines()
+        if len(cur) > self._max_lines:
+            # Mantém apenas últimas N linhas
+            tail = '\n'.join(cur[-self._max_lines:])
+            self.log.setPlainText(tail)
+            # Move cursor para final novamente
+            self.log.moveCursor(self.log.textCursor().MoveOperation.End)
+
+    def clear_log(self):
+        self.log.clear()
 
 # ------------------ Main Window ------------------
 class MainWindow(QMainWindow):
@@ -392,9 +814,8 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("MarmSoft Protótipo PyQt6 Moderno")
         self.resize(1500, 920)
-
         # Estado principal
-        self.sensors: Dict[str, SensorState] = {n: SensorState(n) for n in SENSOR_NAMES_FLEX + SENSOR_NAMES_FSR}
+        self.sensors: Dict[str, SensorState] = {n: SensorState(n) for n in SENSOR_NAMES_FLEX + SENSOR_NAMES_FSR + [GONIOMETRO_NAME]}
         self.session: Optional[AppSession] = None
         self.current_theme = "Dark"
         self.sidebar_collapsed = False
@@ -430,6 +851,7 @@ class MainWindow(QMainWindow):
 
         nav_specs = [
             ("Dashboard", "🏠"),
+            ("Pacientes", "👥"),
             ("Sensores", "🧪"),
             ("Calibração", "🛠"),
             ("Testes", "📊"),
@@ -448,6 +870,7 @@ class MainWindow(QMainWindow):
         # Stacked pages
         self.stack = QStackedWidget()
         self.page_dashboard = DashboardPage()
+        self.page_patients = PatientsPage(MOCK_PATIENTS)
         self.page_sensors = SensorsPage(self.sensors)
         self.page_calib = CalibrationPage()
         self.page_tests = TestsPage()
@@ -455,7 +878,7 @@ class MainWindow(QMainWindow):
         self.page_history = HistoryPage()
         self.page_settings = SettingsPage(self.change_theme)
         self.page_dev = DevPage()
-        for p in [self.page_dashboard,self.page_sensors,self.page_calib,self.page_tests,self.page_games,self.page_history,self.page_settings,self.page_dev]:
+        for p in [self.page_dashboard,self.page_patients,self.page_sensors,self.page_calib,self.page_tests,self.page_games,self.page_history,self.page_settings,self.page_dev]:
             self.stack.addWidget(p)
         self.nav_list.currentRowChanged.connect(self.stack.setCurrentIndex)
 
@@ -463,24 +886,31 @@ class MainWindow(QMainWindow):
         body_h.addWidget(self.stack, 1)
         main_v.addLayout(body_h, 1)
 
+        # Finaliza configuração pós construção básica
+        self._post_setup()
+
+    def _post_setup(self):
         # Seleciona página inicial
         self.nav_list.setCurrentRow(0)
 
         # Timers de simulação / atualização
         self.sensor_timer = QTimer(self); self.sensor_timer.timeout.connect(self.simulate_sensors); self.sensor_timer.start(50)
         self.dashboard_timer = QTimer(self); self.dashboard_timer.timeout.connect(self.update_dashboard); self.dashboard_timer.start(1000)
-    # Tests page updates metrics internally during recording; no periodic external timer needed
 
         # Log e BLE simulado
         self.fake_ble_connected = False
         QTimer.singleShot(1500, self.simulate_ble_connect)
-        self.page_dashboard.append_log("Aplicação iniciada (simulada)")
+        # Logs iniciais
+        self.page_dev.add_line("Aplicação iniciada (simulada)")
         self.page_dev.add_line("[INFO] Protótipo carregado")
 
         # Estilo inicial
         self.apply_stylesheet()
+        # Overlay de início (frontend)
+        self.show_startup_overlay()
 
     def apply_stylesheet(self):
+        # Define paletas
         dark = {
             'bg': '#0e1116', 'top': 'rgba(20,24,30,0.85)', 'top_border': '#1f242b',
             'side_bg':'#161a21','side_border':'#232a33','side_item':'#b6c3cf','side_hover':'#212a33',
@@ -502,40 +932,51 @@ class MainWindow(QMainWindow):
             'label_sensor':'#1e2a33'
         }
         theme = dark if self.current_theme == 'Dark' else light
-        qss = f"""
-QMainWindow {{ background-color: {theme['bg']}; }}
-#TopBar {{ background: {theme['top']}; border-bottom:1px solid {theme['top_border']}; }}
-QToolButton {{ background: transparent; font-size:18px; padding:4px 10px; border:0; color:{theme['text']}; }}
-QToolButton:hover {{ background: {theme['btn_bg_hover']}; border-radius:10px; }}
-QListWidget#Sidebar {{ background:{theme['side_bg']}; border:1px solid {theme['side_border']}; border-radius:18px; padding:12px; }}
-QListWidget#Sidebar::item {{ margin:4px 4px; padding:10px 14px; color:{theme['side_item']}; border-radius:12px; font-size:14px; }}
-QListWidget#Sidebar::item:selected {{ background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 {theme['accent_a']}, stop:1 {theme['accent_b']}); color:#fff; }}
-QListWidget#Sidebar::item:hover:!selected {{ background:{theme['side_hover']}; }}
-QFrame#StatusCard {{ background:{theme['card_bg']}; border:1px solid {theme['card_border']}; border-radius:18px; }}
-QFrame#SensorCard {{ background:{theme['sensor_bg']}; border:1px solid {theme['sensor_border']}; border-radius:14px; }}
-QTextEdit {{ background:{theme['text_edit_bg']}; border:1px solid {theme['text_edit_border']}; border-radius:14px; color:{theme['text']}; padding:8px; }}
-QProgressBar {{ background:{theme['sensor_bg']}; border:1px solid {theme['sensor_border']}; border-radius:10px; height:22px; color:{theme['text']}; }}
-QProgressBar::chunk {{ background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 {theme['progress_a']}, stop:1 {theme['progress_b']}); border-radius:10px; }}
-QLabel[class='card-title'] {{ color:{theme['muted']}; letter-spacing:1px; }}
-QLabel[class='card-value'] {{ color:{theme['text']}; }}
-QLabel[class='brand'] {{ font-size:18px; font-weight:600; color:{theme['text']}; }}
-QLabel[class='badge'] {{ background:{theme['badge_bg']}; padding:4px 12px; border-radius:14px; color:#fff; font-size:12px; }}
-QLabel[class='section-title'] {{ font-size:14px; font-weight:600; color:{theme['text']}; }}
-QLabel[class='sensor-label'] {{ font-weight:600; color:{theme['label_sensor']}; }}
-QComboBox, QSpinBox, QLineEdit {{ background:{theme['input_bg']}; border:1px solid {theme['input_border']}; border-radius:10px; padding:6px 10px; color:{theme['text']}; }}
-QComboBox::drop-down {{ border:0; }}
-QCheckBox {{ color:{theme['text']}; }}
-QCheckBox::indicator {{ width:18px; height:18px; }}
-QCheckBox::indicator:unchecked {{ border:1px solid {theme['checkbox_border']}; background:{theme['checkbox_bg']}; border-radius:5px; }}
-QCheckBox::indicator:checked {{ border:1px solid {theme['checkbox_border_sel']}; background:{theme['checkbox_bg_sel']}; }}
-QScrollBar:vertical {{ background:{theme['side_bg']}; width:10px; margin:4px; border-radius:5px; }}
-QScrollBar::handle:vertical {{ background:{theme['card_border']}; border-radius:5px; min-height:40px; }}
-QScrollBar::handle:vertical:hover {{ background:{theme['accent_a']}; }}
-QScrollBar::add-line, QScrollBar::sub-line {{ height:0; }}
-QPushButton {{ background:{theme['btn_bg']}; border:1px solid {theme['btn_border']}; border-radius:12px; color:{theme['side_item'] if self.current_theme=='Light' else '#dde2e7'}; padding:8px 16px; font-weight:500; }}
-QPushButton:hover {{ background:{theme['btn_bg_hover']}; }}
-QPushButton:pressed {{ background:{theme['btn_bg_press']}; }}
-"""
+        btn_text_color = theme['side_item'] if self.current_theme == 'Light' else '#dde2e7'
+        # Monta QSS escapando chaves com duplicação
+        qss = (
+            f"QMainWindow {{ background-color: {theme['bg']}; }}\n"
+            f"#TopBar {{ background: {theme['top']}; border-bottom:1px solid {theme['top_border']}; }}\n"
+            "#StartupOverlay { background: rgba(0,0,0,0.65); }\n"
+            f"QTableView {{ background:{theme['card_bg']}; border:1px solid {theme['card_border']}; border-radius:14px; gridline-color:{theme['card_border']}; }}\n"
+            f"QHeaderView::section {{ background:{theme['side_bg']}; padding:6px 4px; border:0; color:{theme['side_item']}; }}\n"
+            f"QTableView::item:selected {{ background:{theme['accent_a']}; color:#fff; }}\n"
+            f"QToolButton {{ background: transparent; font-size:18px; padding:4px 10px; border:0; color:{theme['text']}; }}\n"
+            f"QToolButton:hover {{ background: {theme['btn_bg_hover']}; border-radius:10px; }}\n"
+            f"QListWidget#Sidebar {{ background:{theme['side_bg']}; border:1px solid {theme['side_border']}; border-radius:18px; padding:12px; }}\n"
+            f"QListWidget#Sidebar::item {{ margin:4px 4px; padding:10px 14px; color:{theme['side_item']}; border-radius:12px; font-size:14px; }}\n"
+            f"QListWidget#Sidebar::item:selected {{ background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 {theme['accent_a']}, stop:1 {theme['accent_b']}); color:#fff; }}\n"
+            f"QListWidget#Sidebar::item:hover:!selected {{ background:{theme['side_hover']}; }}\n"
+            f"QFrame#StatusCard {{ background:{theme['card_bg']}; border:1px solid {theme['card_border']}; border-radius:18px; }}\n"
+            f"QFrame#SensorCard {{ background:{theme['sensor_bg']}; border:1px solid {theme['sensor_border']}; border-radius:14px; }}\n"
+            f"QTextEdit {{ background:{theme['text_edit_bg']}; border:1px solid {theme['text_edit_border']}; border-radius:14px; color:{theme['text']}; padding:8px; }}\n"
+            f"QProgressBar {{ background:{theme['sensor_bg']}; border:1px solid {theme['sensor_border']}; border-radius:10px; height:22px; color:{theme['text']}; }}\n"
+            f"QProgressBar::chunk {{ background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 {theme['progress_a']}, stop:1 {theme['progress_b']}); border-radius:10px; }}\n"
+            f"QLabel[class='card-title'] {{ color:{theme['muted']}; letter-spacing:1px; }}\n"
+            f"QLabel[class='card-value'] {{ color:{theme['text']}; }}\n"
+            f"QLabel[class='brand'] {{ font-size:18px; font-weight:600; color:{theme['text']}; }}\n"
+            f"QLabel[class='badge'] {{ background:{theme['badge_bg']}; padding:4px 12px; border-radius:14px; color:#fff; font-size:12px; }}\n"
+            f"QLabel[class='section-title'] {{ font-size:14px; font-weight:600; color:{theme['text']}; }}\n"
+            f"QLabel[class='sensor-label'] {{ font-weight:600; color:{theme['label_sensor']}; }}\n"
+            f"QComboBox, QSpinBox, QLineEdit {{ background:{theme['input_bg']}; border:1px solid {theme['input_border']}; border-radius:10px; padding:6px 10px; color:{theme['text']}; }}\n"
+            "QComboBox::drop-down { border:0; }\n"
+            f"QCheckBox {{ color:{theme['text']}; }}\n"
+            f"QCheckBox::indicator {{ width:18px; height:18px; }}\n"
+            f"QCheckBox::indicator:unchecked {{ border:1px solid {theme['checkbox_border']}; background:{theme['checkbox_bg']}; border-radius:5px; }}\n"
+            f"QCheckBox::indicator:checked {{ border:1px solid {theme['checkbox_border_sel']}; background:{theme['checkbox_bg_sel']}; }}\n"
+            f"QScrollBar:vertical {{ background:{theme['side_bg']}; width:10px; margin:4px; border-radius:5px; }}\n"
+            f"QScrollBar::handle:vertical {{ background:{theme['card_border']}; border-radius:5px; min-height:40px; }}\n"
+            f"QScrollBar::handle:vertical:hover {{ background:{theme['accent_a']}; }}\n"
+            "QScrollBar::add-line, QScrollBar::sub-line { height:0; }\n"
+            f"QPushButton {{ background:{theme['btn_bg']}; border:1px solid {theme['btn_border']}; border-radius:12px; color:{btn_text_color}; padding:8px 16px; font-weight:500; }}\n"
+            f"QPushButton:hover {{ background:{theme['btn_bg_hover']}; }}\n"
+            f"QPushButton:pressed {{ background:{theme['btn_bg_press']}; }}\n"
+            # Segmented control styling
+            f"QFrame#Segmented {{ background:{theme['side_bg']}; border:1px solid {theme['side_border']}; border-radius:18px; }}\n"
+            f"QFrame#Segmented > QPushButton {{ background:transparent; border:0; border-radius:14px; padding:6px 18px; color:{btn_text_color}; font-weight:600; }}\n"
+            f"QFrame#Segmented > QPushButton:hover {{ background:{theme['btn_bg_hover']}; }}\n"
+            f"QFrame#Segmented > QPushButton[selected='true'] {{ background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 {theme['accent_a']}, stop:1 {theme['accent_b']}); color:#fff; }}\n"
+        )
         self.setStyleSheet(qss)
 
     def make_icon(self, glyph: str) -> QIcon:
@@ -570,12 +1011,9 @@ QPushButton:pressed {{ background:{theme['btn_bg_press']}; }}
         # update icons (color may change with theme)
         for i in range(self.nav_list.count()):
             it = self.nav_list.item(i)
-            glyph = "?"
             original = it.data(Qt.ItemDataRole.UserRole) or ''
-            # recover first char or if emoji left keep same; easier keep icon constant
-            # we can't extract glyph from icon, so we rebuild based on stored label mapping
             mapping = {
-                'Dashboard':'🏠','Sensores':'🧪','Calibração':'🛠','Testes':'📊','Jogos':'🎮','Histórico':'🗂','Config':'⚙','Dev':'</>'
+                'Dashboard':'🏠','Pacientes':'👥','Sensores':'🧪','Calibração':'🛠','Testes':'📊','Jogos':'🎮','Histórico':'🗂','Config':'⚙','Dev':'</>'
             }
             glyph = mapping.get(original, '•')
             it.setIcon(self.make_icon(glyph))
@@ -587,7 +1025,7 @@ QPushButton:pressed {{ background:{theme['btn_bg_press']}; }}
     def simulate_ble_connect(self):
         self.fake_ble_connected = True
         self.page_dashboard.card_ble.update_value("Conectado")
-        self.page_dashboard.append_log("BLE conectado")
+        self.page_dev.add_line("BLE conectado")
 
     def switch_page(self, idx: int):
         self.stack.setCurrentIndex(idx)
@@ -599,7 +1037,7 @@ QPushButton:pressed {{ background:{theme['btn_bg_press']}; }}
         self.session = AppSession(id=sid, start_time=time.time())
         self.page_dashboard.card_session.update_value("ATIVA")
         self.update_session_badge()
-        self.page_dashboard.append_log(f"Sessão {sid} iniciada")
+        self.page_dev.add_line(f"Sessão {sid} iniciada")
 
     def simulate_sensors(self):
         t = time.time()
@@ -664,11 +1102,33 @@ QPushButton:pressed {{ background:{theme['btn_bg_press']}; }}
             it = self.nav_list.item(i)
             label = it.data(Qt.ItemDataRole.UserRole) or ''
             mapping = {
-                'Dashboard':'🏠','Sensores':'🧪','Calibração':'🛠','Testes':'📊','Jogos':'🎮','Histórico':'🗂','Config':'⚙','Dev':'</>'
+                'Dashboard':'🏠','Pacientes':'👥','Sensores':'🧪','Calibração':'🛠','Testes':'📊','Jogos':'🎮','Histórico':'🗂','Config':'⚙','Dev':'</>'
             }
             it.setIcon(self.make_icon(mapping.get(label,'•')))
         self.apply_stylesheet()
-        self.page_dashboard.append_log(f"Tema alterado para: {theme}")
+        self.page_dev.add_line(f"Tema alterado para: {theme}")
+
+    # --------------- Startup Overlay Handling ---------------
+    def show_startup_overlay(self):
+        self.overlay = StartupOverlay(self, self._overlay_continue)
+        self.overlay.setGeometry(self.rect())
+        self.overlay.show()
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, 'overlay') and self.overlay.isVisible():
+            self.overlay.setGeometry(self.rect())
+    def _overlay_continue(self, paciente: str, fisio: str, cond: str, reg: str):
+        # Apenas log – não integra com resto ainda
+        self.page_dev.add_line(f"Sessão para {paciente} / {fisio} ({cond})")
+        # Poderia adicionar dinamicamente na lista de pacientes (mock)
+        new_id = f"P{len(MOCK_PATIENTS)+1:03d}"
+        MOCK_PATIENTS.append(Patient(new_id, paciente, 30, 'N', cond, fisio, reg))
+        # Atualiza tabela se página pacientes aberta
+        if hasattr(self, 'page_patients'):
+            self.page_patients.model.layoutAboutToBeChanged.emit()
+            self.page_patients.model.patients = MOCK_PATIENTS
+            self.page_patients.model.layoutChanged.emit()
+        self.start_session()
 
     def closeEvent(self, event):
         if QMessageBox.question(self, "Sair", "Deseja realmente sair?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No) == QMessageBox.StandardButton.No:
