@@ -64,3 +64,23 @@ Fase 6 (Avançado Dev & Diagnóstico): Painel Dev, métricas de performance, sim
 - Retenção de configurações persistente entre execuções (tema, seleção de sensores).
 
 (Atualize este arquivo conforme novas observações surgirem.)
+
+
+
+
+Melhorias para fazer no protoripo:
+
+- no menu sensores deve ter a opção dever assim todo separado, ou todos os sensores na mesma tela.
+- na opção de sensores separados quando clicar na telinha do sensor, esse sensor deve ser ampliado, mostrando a tela dividida (tensão e angulo), ou tensão e força, no caso do FSR.
+- acrescentar menu pacientes onde terá uma lista com todos os pacientes (tem que criar uma pasta nova de dados de pacientes)
+- o menu jogos deve ter apenas os icones. ao clicar no icone o jogo se abre nesse campo, ou clique no botão abrir em tela cheia.
+- no menu dev deve aparecer os logs de tudo que acontece.
+- no menu config inserir o controle de suavização (o controle do filtro dos sinais)
+- no menu config inserir a lista de dispositivos disponíves, e a opção de conectar ou desconectar.
+- no menu histórico deve ter uma lista dos ultimos pacientes.
+- ao iniciar o software deve primeiramente abrir uma tela onde é possível escolher o fisioterapeuta, e escolher o paciente. Mas caso não tenha tal profissional ou paciente na lista, deve ter a opção de cadastrar um novo, inserindo todos os dados, todos os dados do fisioterapeuta e todos do paciente (pense quais os dados são necessários) incluindo doença, descrição inicial, 
+- cada paciente também terá um histórico escrito essa descrição deve ser um histórico, cada vez que o paciente usa ela pode ser inserida uma nova descrição que vai virar um lista de históricos. essa descrição deve ser preenchida pelo fisioterapeuta ao final da sessão. 
+- deve ter um botão de finalizar sessão. lá emcima onde está escrito sessão, deverá estar escrito na frente o nome do paciente e do fisioterapeuta. Isso faz com que volta para o a tela de novo paciente. 
+- Todos os dados dos pacientes deve ser salvos durante a sessão. Inclusive quando estiver jogando. 
+- na tela de jogos deverá ter um submenu chamado configurar falanges. onde nela eu vou poder configurar qual sensor está ligado em qual junção interfalÂngica. porque agora os sensores estão avulsos.
+
