@@ -1,8 +1,8 @@
-# Ignore Python cache directories
+# Ignore Python cache directories (any depth)
 __pycache__/
+**/__pycache__/
 # Byte-compiled / optimized / DLL files
-__pycache__/
-*.py[codz]
+*.py[cod]
 *$py.class
 
 # C extensions

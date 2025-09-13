@@ -25,13 +25,13 @@ from typing import Dict, List, Optional, Callable
 
 import numpy as np
 
-from PyQt6.QtCore import Qt, QTimer, QSize, QModelIndex, QVariant, QAbstractTableModel, QSortFilterProxyModel
+from PyQt6.QtCore import Qt, QTimer, QSize, QModelIndex, QVariant, QAbstractTableModel, QSortFilterProxyModel, QThread, pyqtSignal, QObject
 from PyQt6.QtGui import QColor, QIcon, QPixmap, QPainter, QFont, QPalette
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QTextEdit, QLabel, QFrame, QGraphicsDropShadowEffect, QToolButton, QCheckBox,
     QProgressBar, QPushButton, QComboBox, QSpinBox, QFormLayout, QLineEdit,
-    QTableView, QListWidget, QListWidgetItem, QMessageBox, QStackedWidget
+    QTableView, QListWidget, QListWidgetItem, QMessageBox, QStackedWidget, QSlider
 )
 
 
@@ -137,7 +137,8 @@ class DashboardPage(QWidget):
         super().__init__()
         lay = QVBoxLayout(self); lay.setSpacing(20)
         cards_row = QHBoxLayout(); cards_row.setSpacing(16)
-        self.card_ble = StatusCard("BLE", "OFF")
+        # Renomeado para Bluetooth
+        self.card_ble = StatusCard("Bluetooth", "OFF")
         self.card_gonio = StatusCard("GONIÔMETRO", "N/D")
         self.card_calib = StatusCard("CALIBRAÇÃO", "--")
         self.card_session = StatusCard("SESSÃO", "INATIVA")
@@ -156,6 +157,7 @@ class SensorsPage(QWidget):
     # Agora com toggle segmentado, lista de seleção de sinais e sensor adicional goniômetro.
     def __init__(self, sensors: Dict[str, SensorState]):
         super().__init__(); self.sensors = sensors
+        from PyQt6.QtWidgets import QCheckBox  # garante escopo local antes do uso
         self.mode = 'unificado'  # padrão agora é unificado
         self.show_tensao = False
         self.flex_hidden = False
@@ -168,25 +170,46 @@ class SensorsPage(QWidget):
         lbl = QLabel("SENSORES"); lbl.setProperty("class","section-title")
         main_lay.addWidget(lbl)
 
-        seg_row = QHBoxLayout(); seg_row.setSpacing(12)
-        # Segmented control
+        seg_row = QHBoxLayout(); seg_row.setSpacing(16)
+        # Segmented principal (visualização)
         self.segmented = QFrame(); self.segmented.setObjectName("Segmented")
         seg_lay = QHBoxLayout(self.segmented); seg_lay.setContentsMargins(4,4,4,4); seg_lay.setSpacing(2)
-        self.btn_seg_unificado = QPushButton("Unificado"); self.btn_seg_cartoes = QPushButton("Cartões")
-        for b in (self.btn_seg_unificado, self.btn_seg_cartoes):
-            b.setCheckable(True)
-            b.clicked.connect(self._segmented_clicked)
-        self.btn_seg_unificado.setChecked(True)
-        self.btn_seg_unificado.setProperty("selected","true")
-        self.btn_seg_cartoes.setProperty("selected","false")
-        seg_lay.addWidget(self.btn_seg_unificado)
-        seg_lay.addWidget(self.btn_seg_cartoes)
-        seg_row.addWidget(self.segmented, 0, Qt.AlignmentFlag.AlignLeft)
+        self.btn_seg_unificado = QPushButton("Unificado"); self.btn_seg_cartoes = QPushButton("Cartões"); self.btn_seg_antigo = QPushButton("Antigo")
+        for b in (self.btn_seg_unificado, self.btn_seg_cartoes, self.btn_seg_antigo):
+            b.setCheckable(True); b.clicked.connect(self._segmented_clicked)
+        self.btn_seg_unificado.setChecked(True); self.btn_seg_unificado.setProperty("selected","true")
+        self.btn_seg_cartoes.setProperty("selected","false"); self.btn_seg_antigo.setProperty("selected","false")
+        seg_lay.addWidget(self.btn_seg_unificado); seg_lay.addWidget(self.btn_seg_cartoes); seg_lay.addWidget(self.btn_seg_antigo)
 
-        # Checkbox tensão (apenas no unificado)
-        self.tensao_cb = QCheckBox("Mostrar Tensão"); self.tensao_cb.stateChanged.connect(self.toggle_tensao)
-        seg_row.addWidget(self.tensao_cb)
+        # Segmented secundário (modo flex/fsr do plot antigo)
+        self.segmented_old_mode = QFrame(); self.segmented_old_mode.setObjectName("Segmented")
+        old_lay = QHBoxLayout(self.segmented_old_mode); old_lay.setContentsMargins(4,4,4,4); old_lay.setSpacing(2)
+        self.btn_old_flex = QPushButton("Flex"); self.btn_old_fsr = QPushButton("FSR")
+        for b in (self.btn_old_flex, self.btn_old_fsr):
+            b.setCheckable(True); b.clicked.connect(self._old_mode_segment_clicked)
+        self.btn_old_flex.setChecked(True); self.btn_old_flex.setProperty("selected","true")
+        self.btn_old_fsr.setProperty("selected","false")
+        old_lay.addWidget(self.btn_old_flex); old_lay.addWidget(self.btn_old_fsr)
+        self.segmented_old_mode.setVisible(False)
+
+        seg_row.addWidget(self.segmented, 0)
+        seg_row.addWidget(self.segmented_old_mode, 0)
         seg_row.addStretch()
+
+        # Grupo opções modo antigo (Legenda / Tensão) – fica à direita e só aparece no modo 'antigo'
+        self.old_mode_opts = QFrame(); self.old_mode_opts.setObjectName('OldModeOpts')
+        omo_lay = QHBoxLayout(self.old_mode_opts); omo_lay.setContentsMargins(0,0,0,0); omo_lay.setSpacing(10)
+        self.chk_old_legend = QCheckBox("Legenda"); self.chk_old_legend.setChecked(True); self.chk_old_legend.setProperty('class','pretty')
+        self.chk_old_voltage = QCheckBox("Tensão"); self.chk_old_voltage.setChecked(True); self.chk_old_voltage.setProperty('class','pretty')
+        self.chk_old_legend.stateChanged.connect(self._old_toggle_legend)
+        self.chk_old_voltage.stateChanged.connect(self._old_toggle_voltage)
+        omo_lay.addWidget(self.chk_old_legend); omo_lay.addWidget(self.chk_old_voltage)
+        self.old_mode_opts.setVisible(False)
+
+        # Checkbox tensão (apenas no unificado/cartões) permanece à direita quando não for modo antigo
+        self.tensao_cb = QCheckBox("Mostrar Tensão"); self.tensao_cb.setProperty('class','pretty'); self.tensao_cb.stateChanged.connect(self.toggle_tensao)
+        seg_row.addWidget(self.tensao_cb, 0, Qt.AlignmentFlag.AlignRight)
+        seg_row.addWidget(self.old_mode_opts, 0, Qt.AlignmentFlag.AlignRight)
         main_lay.addLayout(seg_row)
 
         from PyQt6.QtWidgets import QStackedWidget, QScrollArea
@@ -294,11 +317,67 @@ class SensorsPage(QWidget):
         scroll_lay.addStretch()
         uni_outer.addWidget(scroll)
         self.mode_stack.addWidget(page_uni)
-        main_lay.addStretch()
 
-        # Definir índice inicial para modo unificado
+        # --- Página Antiga (Matplotlib) ---
+        page_old = QWidget(); old_lay = QVBoxLayout(page_old); old_lay.setContentsMargins(0,0,0,0)
+        # Container do plot
+        from Modules.plot_manager_qt_old import PlotManagerQtOld
+        self.old_plot_container = QFrame(); old_plot_layout = QVBoxLayout(self.old_plot_container); old_plot_layout.setContentsMargins(0,0,0,0)
+        old_lay.addWidget(self.old_plot_container,1)
+        # Checkboxes de seleção de sinais agora abaixo do gráfico
+        sel_row = QHBoxLayout(); sel_row.setSpacing(10)
+        from PyQt6.QtWidgets import QCheckBox as _QCB2
+        self.old_checks = {}
+        gchk = _QCB2('goniometer'); gchk.setChecked(True); gchk.setProperty('class','pretty'); sel_row.addWidget(gchk); self.old_checks['goniometer']=gchk
+        for sid in sorted([k for k in sensors.keys() if not k.startswith('goniometro')]):
+            c = _QCB2(sid); c.setChecked(True); c.setProperty('class','pretty'); sel_row.addWidget(c); self.old_checks[sid]=c
+        sel_row.addStretch(); old_lay.addLayout(sel_row)
+        self.old_plot = PlotManagerQtOld(
+            self.old_plot_container,
+            sensors={k: v for k, v in sensors.items() if not k.startswith('goniometro')},
+            displayed_sensors=set(['goniometer'] + list(sensors.keys()))
+        )
+        def _old_update_checks():
+            displayed = {k for k, cb in self.old_checks.items() if cb.isChecked()}
+            self.old_plot.update_displayed_sensors(displayed)
+        for cb in self.old_checks.values():
+            cb.stateChanged.connect(_old_update_checks)
+        # Adiciona página antiga ao QStackedWidget (index 2)
+        self.mode_stack.addWidget(page_old)
+        # Define estado inicial realmente como 'unificado' (index 1) conforme self.mode
         self.mode_stack.setCurrentIndex(1)
         self.tensao_cb.setVisible(True)
+        self.old_mode_opts.setVisible(False)
+
+    def _old_toggle_legend(self):
+        if hasattr(self, 'old_plot'):
+            self.old_plot.set_show_legend(self.chk_old_legend.isChecked())
+
+    def _old_toggle_voltage(self):
+        if hasattr(self, 'old_plot'):
+            self.old_plot.set_show_voltage(self.chk_old_voltage.isChecked())
+        # Nada mais aqui; código de inicialização removido
+
+    def _old_set_mode(self, mode: str):
+        if hasattr(self,'old_plot'):
+            self.old_plot.set_mode(mode)
+        self._old_mode_cached = mode
+        if hasattr(self,'btn_old_flex'):
+            if mode == 'flex':
+                self.btn_old_flex.setChecked(True); self.btn_old_fsr.setChecked(False)
+                self.btn_old_flex.setProperty('selected','true'); self.btn_old_fsr.setProperty('selected','false')
+            else:
+                self.btn_old_flex.setChecked(False); self.btn_old_fsr.setChecked(True)
+                self.btn_old_flex.setProperty('selected','false'); self.btn_old_fsr.setProperty('selected','true')
+            for b in (self.btn_old_flex, self.btn_old_fsr):
+                b.style().unpolish(b); b.style().polish(b); b.update()
+
+    def _old_mode_segment_clicked(self):
+        sender = self.sender()
+        if sender == self.btn_old_flex:
+            self._old_set_mode('flex')
+        else:
+            self._old_set_mode('fsr')
 
     def toggle_mode(self):
         # Usado se ainda houver chamadas externas
@@ -345,10 +424,13 @@ class SensorsPage(QWidget):
             self.multi_flex.update(); self.multi_flex_t.update()
 
     def _segmented_clicked(self):
-        if self.sender() == self.btn_seg_unificado:
+        sender = self.sender()
+        if sender == self.btn_seg_unificado:
             self._set_mode('unificado')
-        else:
+        elif sender == self.btn_seg_cartoes:
             self._set_mode('cartoes')
+        else:
+            self._set_mode('antigo')
 
     def _set_mode(self, target: str):
         if target == self.mode:
@@ -357,17 +439,36 @@ class SensorsPage(QWidget):
         if self.mode == 'unificado':
             self.mode_stack.setCurrentIndex(1)
             self.tensao_cb.setVisible(True)
-            self.btn_seg_unificado.setChecked(True); self.btn_seg_cartoes.setChecked(False)
-            self.btn_seg_unificado.setProperty('selected','true'); self.btn_seg_cartoes.setProperty('selected','false')
-        else:
+            self.segmented_old_mode.setVisible(False)
+            self.old_mode_opts.setVisible(False)
+            self.btn_seg_unificado.setChecked(True); self.btn_seg_cartoes.setChecked(False); self.btn_seg_antigo.setChecked(False)
+            self.btn_seg_unificado.setProperty('selected','true'); self.btn_seg_cartoes.setProperty('selected','false'); self.btn_seg_antigo.setProperty('selected','false')
+        elif self.mode == 'cartoes':
             self.mode_stack.setCurrentIndex(0)
             self.tensao_cb.setVisible(False)
-            self.btn_seg_unificado.setChecked(False); self.btn_seg_cartoes.setChecked(True)
-            self.btn_seg_unificado.setProperty('selected','false'); self.btn_seg_cartoes.setProperty('selected','true')
-        # Força reestilização dinâmica
-        for b in (self.btn_seg_unificado, self.btn_seg_cartoes):
+            self.segmented_old_mode.setVisible(False)
+            self.old_mode_opts.setVisible(False)
+            self.btn_seg_unificado.setChecked(False); self.btn_seg_cartoes.setChecked(True); self.btn_seg_antigo.setChecked(False)
+            self.btn_seg_unificado.setProperty('selected','false'); self.btn_seg_cartoes.setProperty('selected','true'); self.btn_seg_antigo.setProperty('selected','false')
+        else:  # antigo
+            self.mode_stack.setCurrentIndex(2)
+            self.tensao_cb.setVisible(False)
+            self.segmented_old_mode.setVisible(True)
+            self.old_mode_opts.setVisible(True)
+            self.btn_seg_unificado.setChecked(False); self.btn_seg_cartoes.setChecked(False); self.btn_seg_antigo.setChecked(True)
+            self.btn_seg_unificado.setProperty('selected','false'); self.btn_seg_cartoes.setProperty('selected','false'); self.btn_seg_antigo.setProperty('selected','true')
+        for b in (self.btn_seg_unificado, self.btn_seg_cartoes, self.btn_seg_antigo):
             b.style().unpolish(b); b.style().polish(b); b.update()
         self.update()
+
+    def update_old_plot(self, current_time: float, latest_readings: dict):
+        if self.mode == 'antigo' and hasattr(self,'old_plot'):
+            try:
+                mode_txt = getattr(self, '_old_mode_cached', 'flex')
+                self.old_plot.set_mode(mode_txt)
+                self.old_plot.update(current_time, latest_readings)
+            except RuntimeError:
+                pass
 
     def update_unified_enabled(self):
         enabled_flex = {n for n, cb in self.unified_checks_flex.items() if cb.isChecked()}
@@ -529,26 +630,14 @@ class GameCanvas(QWidget):
         self.update()
 
 class GamesPage(QWidget):
-    def __init__(self):
+    def __init__(self, launch_flybird: Callable[[],None]):
         super().__init__()
-        layout = QVBoxLayout(self)
-        self.selector = QComboBox(); self.selector.addItems(["Pong Simples","Pulso"])
-        self.canvas_container = QVBoxLayout()
-        self.current_canvas: Optional[GameCanvas]=None
-        self.selector.currentIndexChanged.connect(self.switch_game)
-        layout.addWidget(QLabel("Biblioteca de Jogos"))
-        layout.addWidget(self.selector)
-        canvas_host = QWidget(); canvas_host.setLayout(self.canvas_container)
-        layout.addWidget(canvas_host)
-        layout.addStretch()
-        self.switch_game(0)
-    def switch_game(self, idx:int):
-        if self.current_canvas:
-            w = self.current_canvas
-            self.canvas_container.removeWidget(w); w.deleteLater()
-        game_type = 'pong' if idx==0 else 'pulse'
-        self.current_canvas = GameCanvas(game_type)
-        self.canvas_container.addWidget(self.current_canvas)
+        lay = QVBoxLayout(self)
+        lay.addWidget(QLabel("Jogos"))
+        btn = QPushButton("FlyBird")
+        btn.clicked.connect(launch_flybird)
+        lay.addWidget(btn)
+        lay.addStretch()
 
 class HistoryModel(QAbstractTableModel):
     def __init__(self):
@@ -810,13 +899,21 @@ class DevPage(QWidget):
 
 # ------------------ Main Window ------------------
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, sensors: Dict[str, object]=None, latest_readings: Dict[str,float]=None, goniometer=None):
         super().__init__()
         self.setWindowTitle("MarmSoft Protótipo PyQt6 Moderno")
         self.resize(1500, 920)
         # Estado principal
-        self.sensors: Dict[str, SensorState] = {n: SensorState(n) for n in SENSOR_NAMES_FLEX + SENSOR_NAMES_FSR + [GONIOMETRO_NAME]}
-        self.session: Optional[AppSession] = None
+        # Sensores backend (SensorData) e storage de leituras
+        self.sensor_backend = sensors or {}
+        self.latest_readings = latest_readings or {}
+        self.goniometer = goniometer
+        sensor_keys = list(self.sensor_backend.keys()) if self.sensor_backend else (SENSOR_NAMES_FLEX + SENSOR_NAMES_FSR + [GONIOMETRO_NAME])
+        # Garante que o goniômetro apareça nos painéis se estiver disponível
+        if self.goniometer and GONIOMETRO_NAME not in sensor_keys:
+            sensor_keys.append(GONIOMETRO_NAME)
+        self.sensors = {n: SensorState(n) for n in sensor_keys}
+        self.session = None  # AppSession | None
         self.current_theme = "Dark"
         self.sidebar_collapsed = False
 
@@ -874,9 +971,11 @@ class MainWindow(QMainWindow):
         self.page_sensors = SensorsPage(self.sensors)
         self.page_calib = CalibrationPage()
         self.page_tests = TestsPage()
-        self.page_games = GamesPage()
+        self.page_games = GamesPage(self._launch_flybird)
         self.page_history = HistoryPage()
         self.page_settings = SettingsPage(self.change_theme)
+        # Extensões dinâmicas (BLE + filtro) após construção da page_settings
+        self._extend_settings_with_ble_and_filter()
         self.page_dev = DevPage()
         for p in [self.page_dashboard,self.page_patients,self.page_sensors,self.page_calib,self.page_tests,self.page_games,self.page_history,self.page_settings,self.page_dev]:
             self.stack.addWidget(p)
@@ -889,13 +988,30 @@ class MainWindow(QMainWindow):
         # Finaliza configuração pós construção básica
         self._post_setup()
 
+    def _launch_flybird(self):
+        try:
+            from threading import Thread
+            from FlyBird.main_fb import main_fb
+            def run_game():
+                # fornece função de sensor flex6 se disponível
+                get_angle = lambda: self.latest_readings.get('flex6_angle', 0.0)
+                main_fb(sensor_data_provider=get_angle)
+            Thread(target=run_game, daemon=True).start()
+            self.page_dev.add_line("FlyBird iniciado")
+        except Exception as e:
+            self.page_dev.add_line(f"Erro ao iniciar FlyBird: {e}")
+
     def _post_setup(self):
         # Seleciona página inicial
         self.nav_list.setCurrentRow(0)
 
         # Timers de simulação / atualização
-        self.sensor_timer = QTimer(self); self.sensor_timer.timeout.connect(self.simulate_sensors); self.sensor_timer.start(50)
-        self.dashboard_timer = QTimer(self); self.dashboard_timer.timeout.connect(self.update_dashboard); self.dashboard_timer.start(1000)
+        self.sensor_timer = QTimer(self)
+        self.sensor_timer.timeout.connect(self._update_sensors_loop)
+        self.sensor_timer.start(50)
+        self.dashboard_timer = QTimer(self)
+        self.dashboard_timer.timeout.connect(self.update_dashboard)
+        self.dashboard_timer.start(1000)
 
         # Log e BLE simulado
         self.fake_ble_connected = False
@@ -962,8 +1078,8 @@ class MainWindow(QMainWindow):
             "QComboBox::drop-down { border:0; }\n"
             f"QCheckBox {{ color:{theme['text']}; }}\n"
             f"QCheckBox::indicator {{ width:18px; height:18px; }}\n"
-            f"QCheckBox::indicator:unchecked {{ border:1px solid {theme['checkbox_border']}; background:{theme['checkbox_bg']}; border-radius:5px; }}\n"
-            f"QCheckBox::indicator:checked {{ border:1px solid {theme['checkbox_border_sel']}; background:{theme['checkbox_bg_sel']}; }}\n"
+            f"QCheckBox::indicator:unchecked {{ border:1px solid {theme['checkbox_border']}; background:{theme['checkbox_bg']}; border-radius:6px; }}\n"
+            f"QCheckBox::indicator:checked {{ border:1px solid {theme['checkbox_border_sel']}; border-radius:6px; background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 {theme['accent_a']}, stop:1 {theme['accent_b']}); }}\n"
             f"QScrollBar:vertical {{ background:{theme['side_bg']}; width:10px; margin:4px; border-radius:5px; }}\n"
             f"QScrollBar::handle:vertical {{ background:{theme['card_border']}; border-radius:5px; min-height:40px; }}\n"
             f"QScrollBar::handle:vertical:hover {{ background:{theme['accent_a']}; }}\n"
@@ -1039,30 +1155,194 @@ class MainWindow(QMainWindow):
         self.update_session_badge()
         self.page_dev.add_line(f"Sessão {sid} iniciada")
 
-    def simulate_sensors(self):
-        t = time.time()
-        for name, st in self.sensors.items():
-            if name.startswith('flex'):
-                v = 30 + 15*math.sin(t*2 + hash(name)%10)
-            else:
-                v = 5 + 3*math.sin(t*1.5 + hash(name)%7)
-            st.last_value = v
-            st.values.append(v)
-            if len(st.values)>500: st.values.pop(0)
-            # Atualiza plots se página sensores visível
-            self.page_sensors.push_value(name, v)
-        # Atualiza sparklines principais
-        avg_flex = sum(self.sensors[n].last_value for n in self.sensors if n.startswith('flex'))/len(SENSOR_NAMES_FLEX)
-        avg_fsr = sum(self.sensors[n].last_value for n in self.sensors if n.startswith('fsr'))/len(SENSOR_NAMES_FSR)
-        self.page_dashboard.spark_flex.push(avg_flex)
-        self.page_dashboard.spark_fsr.push(avg_fsr)
+    def _update_sensors_loop(self):
+        current_time = time.time()
+        # Atualiza leitura do goniômetro (thread externa preenche self.goniometer.angle)
+        if self.goniometer and getattr(self.goniometer, 'dll', None):
+            try:
+                self.latest_readings['goniometer_angle'] = float(self.goniometer.get_angle())
+            except Exception:
+                # Mantém valor anterior em caso de erro momentâneo
+                pass
+        if self.sensor_backend:
+            # Alimenta valores dos latest_readings (preenchidos pelo BLE notification handler no futuro) nas curves
+            for name, st in self.sensors.items():
+                if name.startswith('flex'):
+                    v = self.latest_readings.get(f"{name}_angle", 0.0)
+                elif name.startswith('fsr'):
+                    v = self.latest_readings.get(f"{name}_force", 0.0)
+                elif name == GONIOMETRO_NAME:
+                    v = self.latest_readings.get('goniometer_angle', 0.0)
+                else:
+                    v = 0.0
+                st.last_value = v
+                st.values.append(v)
+                if len(st.values) > 500:
+                    st.values.pop(0)
+                self.page_sensors.push_value(name, v)
+        else:
+            # fallback para simulação antiga
+            for name, st in self.sensors.items():
+                if name.startswith('flex'):
+                    v = 30 + 15*math.sin(current_time*2 + hash(name)%10)
+                else:
+                    v = 5 + 3*math.sin(current_time*1.5 + hash(name)%7)
+                st.last_value = v
+                st.values.append(v)
+                if len(st.values)>500: st.values.pop(0)
+                self.page_sensors.push_value(name, v)
+        # Sparklines
+        flex_vals = [self.sensors[n].last_value for n in self.sensors if n.startswith('flex')]
+        fsr_vals = [self.sensors[n].last_value for n in self.sensors if n.startswith('fsr')]
+        if flex_vals:
+            self.page_dashboard.spark_flex.push(sum(flex_vals)/len(flex_vals))
+        if fsr_vals:
+            self.page_dashboard.spark_fsr.push(sum(fsr_vals)/len(fsr_vals))
+        # Atualiza painel antigo se ativo
+        if hasattr(self, 'page_sensors'):
+            self.page_sensors.update_old_plot(current_time, self.latest_readings)
+
+    # ---------- Extensão Config (BLE / Filter) ----------
+    def _extend_settings_with_ble_and_filter(self):
+        # Inserir widgets extras abaixo do formulário existente
+        from PyQt6.QtWidgets import QVBoxLayout, QListWidget, QHBoxLayout
+        host_layout = self.page_settings.layout()
+        # Container visual
+        ble_title = QLabel("Conexão Bluetooth")
+        ble_title.setProperty('class','section-title')
+        host_layout.addRow(ble_title)
+        btn_row = QHBoxLayout()
+        self.btn_ble_scan = QPushButton("Atualizar")
+        self.btn_ble_connect = QPushButton("Conectar")
+        self.btn_ble_disconnect = QPushButton("Desconectar")
+        self.btn_ble_disconnect.setEnabled(False)
+        for b in (self.btn_ble_scan,self.btn_ble_connect,self.btn_ble_disconnect):
+            btn_row.addWidget(b)
+        host_layout.addRow(btn_row)
+        self.list_ble = QListWidget(); self.list_ble.setMaximumHeight(140)
+        host_layout.addRow(self.list_ble)
+        self.lbl_ble_status = QLabel("Status: Desconectado")
+        host_layout.addRow(self.lbl_ble_status)
+        # Suavização
+        smooth_title = QLabel("Filtro de Suavização (alpha)")
+        smooth_title.setProperty('class','section-title')
+        host_layout.addRow(smooth_title)
+        self.slider_alpha = QSlider(Qt.Orientation.Horizontal)
+        self.slider_alpha.setRange(1,100)
+        # Força valor inicial 0.50 independentemente do backend
+        self.slider_alpha.setValue(50)
+        if self.sensor_backend:
+            for s in self.sensor_backend.values():
+                s.alpha = 0.5
+        self.lbl_alpha_val = QLabel(f"{0.50:.2f}")
+        row_alpha = QHBoxLayout(); row_alpha.addWidget(self.slider_alpha,1); row_alpha.addWidget(self.lbl_alpha_val)
+        host_layout.addRow(row_alpha)
+        self.slider_alpha.valueChanged.connect(self._alpha_changed)
+        # Ligações botões BLE (placeholders; implementação real virá com scan async)
+        self.btn_ble_scan.clicked.connect(self._ble_scan)
+        self.btn_ble_connect.clicked.connect(self._ble_connect)
+        self.btn_ble_disconnect.clicked.connect(self._ble_disconnect)
+        # Estado
+        self._ble_manager = None
+        self._ble_device_list = []
+        self._ble_target_uuid = "abcdef01-1234-5678-1234-56789abcdef0"
+        self._ble_thread = None
+
+    def _alpha_changed(self, val: int):
+        alpha = val/100.0
+        self.lbl_alpha_val.setText(f"{alpha:.2f}")
+        for sensor in (self.sensor_backend or {}).values():
+            sensor.alpha = alpha
+        self.page_dev.add_line(f"Alpha ajustado para {alpha:.2f}")
+
+    class _BleScanWorker(QObject):
+        finished = pyqtSignal(list)
+        def run(self):
+            import asyncio
+            try:
+                from bleak import BleakScanner
+                loop = asyncio.new_event_loop(); asyncio.set_event_loop(loop)
+                devices = loop.run_until_complete(BleakScanner.discover())
+                loop.close()
+            except Exception:
+                devices = []
+            self.finished.emit(devices)
+
+    def _ble_scan(self):
+        # Worker em QThread para varredura BLE
+        self.page_dev.add_line("Varredura BLE iniciada...")
+        self.list_ble.clear(); self.list_ble.addItem("Buscando...")
+        self._ble_scan_thread = QThread()
+        self._ble_scan_worker = MainWindow._BleScanWorker()
+        self._ble_scan_worker.moveToThread(self._ble_scan_thread)
+        self._ble_scan_thread.started.connect(self._ble_scan_worker.run)
+        self._ble_scan_worker.finished.connect(self._ble_scan_thread.quit)
+        self._ble_scan_worker.finished.connect(self._populate_ble_devices)
+        self._ble_scan_thread.start()
+
+    def _populate_ble_devices(self, devices: list):
+        self._ble_device_list = devices
+        self.list_ble.clear()
+        for d in devices:
+            self.list_ble.addItem(f"{d.name or 'Desconhecido'} ({d.address})")
+        self.page_dev.add_line(f"Scan BLE concluído: {len(devices)} dispositivos")
+
+    def _ble_connect(self):
+        sel = self.list_ble.currentRow()
+        if sel < 0 or sel >= len(self._ble_device_list):
+            self.page_dev.add_line("Nenhum dispositivo selecionado")
+            return
+        device = self._ble_device_list[sel]
+        from threading import Thread
+        from Modules.ble_manager import BLEManager
+        self.page_dev.add_line(f"Conectando a {device.address}...")
+        self.lbl_ble_status.setText("Status: Conectando...")
+        def _notify(sender, data: bytes):
+            try:
+                decoded = data.decode('utf-8')
+                parts = decoded.split(', ')
+                for part in parts:
+                    if '=' not in part: continue
+                    name, vstr = part.split('=')
+                    voltage = float(vstr.rstrip('V'))
+                    sid = name.lower()
+                    if sid in self.sensor_backend:
+                        filt_v = self.sensor_backend[sid].apply_filter(voltage)
+                        self.latest_readings[f"{sid}_voltage"] = filt_v
+                        if sid.startswith('flex'):
+                            ang = self.sensor_backend[sid].get_angle(filt_v)
+                            self.latest_readings[f"{sid}_angle"] = ang
+                        elif sid.startswith('fsr'):
+                            force = self.sensor_backend[sid].get_force(filt_v)
+                            self.latest_readings[f"{sid}_force"] = force
+            except Exception as e:
+                self.page_dev.add_line(f"Erro notif: {e}")
+        self._ble_manager = BLEManager(device.address, self._ble_target_uuid, _notify)
+        self._ble_thread = Thread(target=self._ble_manager.start_loop, daemon=True)
+        self._ble_thread.start()
+        self.lbl_ble_status.setText(f"Status: Conectado ({device.address})")
+        self.btn_ble_connect.setEnabled(False); self.btn_ble_disconnect.setEnabled(True)
+        self.page_dashboard.card_ble.update_value("Conectado")
+
+    def _ble_disconnect(self):
+        if self._ble_manager:
+            self._ble_manager.stop_loop()
+            self._ble_manager = None
+        self.lbl_ble_status.setText("Status: Desconectado")
+        self.btn_ble_connect.setEnabled(True); self.btn_ble_disconnect.setEnabled(False)
+        self.page_dashboard.card_ble.update_value("OFF")
+        self.page_dev.add_line("BLE desconectado")
 
     def update_dashboard(self):
         if not self.session:
             # autoinicia sessão para demonstração
             self.start_session()
         self.page_dashboard.card_calib.update_value("v1 (simulada)")
-        self.page_dashboard.card_gonio.update_value("OK")
+        self.update_goniometer_status()
+
+    def update_goniometer_status(self):
+        status = "Conectado" if (self.goniometer and getattr(self.goniometer, 'dll', None)) else "Desconectado"
+        self.page_dashboard.card_gonio.update_value(status)
 
     # ------------------ Temas ------------------
     def change_theme(self, theme: str):
@@ -1107,6 +1387,12 @@ class MainWindow(QMainWindow):
             it.setIcon(self.make_icon(mapping.get(label,'•')))
         self.apply_stylesheet()
         self.page_dev.add_line(f"Tema alterado para: {theme}")
+        # Propaga tema para o plot antigo se existir
+        try:
+            if hasattr(self, 'page_sensors') and hasattr(self.page_sensors, 'old_plot'):
+                self.page_sensors.old_plot.apply_theme(theme)
+        except Exception:
+            pass
 
     # --------------- Startup Overlay Handling ---------------
     def show_startup_overlay(self):
