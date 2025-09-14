@@ -6,10 +6,12 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from collections import deque
 import matplotlib.pyplot as plt
 
-class PlotManagerQtOld:
-    """Replica fiel do PlotManager antigo usando Qt.
+class PlotManager:
+    """Gerenciador de plots em Qt (antigo *QtOld* renomeado).
 
-    Mantém nomes de métodos: set_mode, update, clear, update_displayed_sensors.
+    Mantém API: set_mode, update, clear, update_displayed_sensors, apply_theme,
+    set_show_legend, set_show_voltage. Foi renomeado de PlotManagerQtOld após
+    unificação dos nomes de arquivo.
     """
     def __init__(self, parent, time_window=10, sensors=None, displayed_sensors=None):
         self.time_window = time_window
@@ -247,3 +249,6 @@ class PlotManagerQtOld:
             self.set_fsr_mode_labels()
         if hasattr(self, 'canvas'):
             self.canvas.draw_idle()
+
+# Backward compatibility alias (caso algum código externo ainda importe)
+PlotManagerQtOld = PlotManager

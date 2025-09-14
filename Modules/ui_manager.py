@@ -160,8 +160,9 @@ class SensorsPage(QWidget):
         self.show_tensao = False
         self.flex_hidden = False
         self.fsr_hidden = False
-        # conjunto de nomes habilitados (para modo unificado)
-        self.enabled_names = set(sensors.keys())
+        # Conjunto de nomes habilitados (para modo unificado)
+        # Ajuste: deixar 'flex8' desmarcado/inativo por padrão (solicitação usuário)
+        self.enabled_names = {n for n in sensors.keys() if n != 'flex8'}
         main_lay = QVBoxLayout(self); main_lay.setSpacing(14)
 
         # Header: Título + linha com toggle segmentado e opções
@@ -219,7 +220,10 @@ class SensorsPage(QWidget):
         filter_row = QHBoxLayout(); filter_row.setSpacing(6)
         self.checks: Dict[str, QCheckBox] = {}
         for name in sensors.keys():
-            cb = QCheckBox(name); cb.setChecked(True); cb.stateChanged.connect(self.update_visible)
+            cb = QCheckBox(name)
+            # flex8 inicia desmarcado
+            cb.setChecked(False if name == 'flex8' else True)
+            cb.stateChanged.connect(self.update_visible)
             filter_row.addWidget(cb); self.checks[name]=cb
         filter_row.addStretch(); cards_lay.addLayout(filter_row)
         # Grupos Flex / FSR
@@ -301,7 +305,9 @@ class SensorsPage(QWidget):
         # Flex + goniômetro
         flex_checks_wrap = QWidget(); flex_checks_lay = QHBoxLayout(flex_checks_wrap); flex_checks_lay.setContentsMargins(4,0,4,4); flex_checks_lay.setSpacing(8)
         for name in flex_names_unified:
-            cb = QCheckBox(name); cb.setChecked(True); cb.stateChanged.connect(self.update_unified_enabled)
+            cb = QCheckBox(name)
+            cb.setChecked(False if name == 'flex8' else True)
+            cb.stateChanged.connect(self.update_unified_enabled)
             self.unified_checks_flex[name] = cb; flex_checks_lay.addWidget(cb)
         flex_checks_lay.addStretch(); block_flex.addWidget(flex_checks_wrap)
         # FSR
@@ -318,8 +324,7 @@ class SensorsPage(QWidget):
 
         # --- Página Antiga (Matplotlib) ---
         page_old = QWidget(); old_lay = QVBoxLayout(page_old); old_lay.setContentsMargins(0,0,0,0)
-        # Container do plot
-        from Modules.plot_manager_qt_old import PlotManagerQtOld
+        from Modules.plot_manager import PlotManager  # import local para evitar custos se não usar
         self.old_plot_container = QFrame(); old_plot_layout = QVBoxLayout(self.old_plot_container); old_plot_layout.setContentsMargins(0,0,0,0)
         old_lay.addWidget(self.old_plot_container,1)
         # Checkboxes de seleção de sinais agora abaixo do gráfico
@@ -328,12 +333,15 @@ class SensorsPage(QWidget):
         self.old_checks = {}
         gchk = _QCB2('goniometer'); gchk.setChecked(True); gchk.setProperty('class','pretty'); sel_row.addWidget(gchk); self.old_checks['goniometer']=gchk
         for sid in sorted([k for k in sensors.keys() if not k.startswith('goniometro')]):
-            c = _QCB2(sid); c.setChecked(True); c.setProperty('class','pretty'); sel_row.addWidget(c); self.old_checks[sid]=c
+            c = _QCB2(sid)
+            c.setChecked(False if sid == 'flex8' else True)
+            c.setProperty('class','pretty'); sel_row.addWidget(c); self.old_checks[sid]=c
         sel_row.addStretch(); old_lay.addLayout(sel_row)
-        self.old_plot = PlotManagerQtOld(
+        self.old_plot = PlotManager(
             self.old_plot_container,
             sensors={k: v for k, v in sensors.items() if not k.startswith('goniometro')},
-            displayed_sensors=set(['goniometer'] + list(sensors.keys()))
+            # 'flex8' inicia oculto
+            displayed_sensors=set(['goniometer'] + [k for k in sensors.keys() if k != 'flex8'])
         )
         def _old_update_checks():
             displayed = {k for k, cb in self.old_checks.items() if cb.isChecked()}
@@ -1312,6 +1320,15 @@ class MainWindow(QMainWindow):
                     name, vstr = part.split('=')
                     voltage = float(vstr.rstrip('V'))
                     sid = name.lower()
+                    # -------- Mapeamento lógico flex3 <-> flex8 --------
+                    # Para atender necessidade de inversão dos canais físicos, trocamos
+                    # a identificação antes de alimentar backend / leituras.
+                    # Assim: dado vindo como flex3 passa a ser tratado como flex8 e vice‑versa.
+                    # (Reversível removendo bloco.)
+                    if sid == 'flex3':
+                        sid = 'flex8'
+                    elif sid == 'flex8':
+                        sid = 'flex3'
                     if sid in self.sensor_backend:
                         filt_v = self.sensor_backend[sid].apply_filter(voltage)
                         self.latest_readings[f"{sid}_voltage"] = filt_v
