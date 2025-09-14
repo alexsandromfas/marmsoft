@@ -295,6 +295,8 @@ class SensorsPage(QWidget):
         self.mode_stack.addWidget(page_old)
         # Agora só duas páginas: 0=cartões, 1=unificado (plot)
         self.mode_stack.setCurrentIndex(1)
+        # Exibe imediatamente os toggles Flex/FSR e opções quando iniciamos em modo unificado
+        self.segmented_old_mode.setVisible(True)
         self.old_mode_opts.setVisible(True)
 
     def _old_toggle_legend(self):
@@ -421,40 +423,218 @@ class MultiSensorPlot(QWidget):
 
 
 class CalibrationPage(QWidget):
-    def __init__(self):
+    """Página de Calibração: replica visual do plot unificado (flex/fsr) porém focada em um sensor de cada vez.
+
+    Requisitos implementados:
+    - Toggle Flex/FSR
+    - Combo de seleção de sensor (apenas 1 ativo). Para Flex, sempre inclui goniômetro no subplot de ângulo.
+    - Uso de PlotManager reduzindo displayed_sensors ao sensor selecionado + goniômetro (flex) ou sensor fsr.
+    - Botões: Iniciar Gravação, Parar, Calibrar (somente flex funcional). FSR ainda não grava.
+    - Salvamento CSV em calibrations/flex/calibration_<sensor>.csv (Voltage,Angle) e reaplicação imediata.
+    """
+    def __init__(self, sensors: Dict[str, SensorState], sensor_backend: Dict[str, object], latest_readings: dict, theme_accessor: callable):
         super().__init__()
-        layout = QVBoxLayout(self)
-        self.stage_label = QLabel("Fluxo: Aguardando início")
-        self.progress = QProgressBar(); self.progress.setRange(0, 100)
-        self.start_btn = QPushButton("Iniciar Calibração")
-        self.start_btn.clicked.connect(self.start_flow)
-        self.next_btn = QPushButton("Próximo Passo"); self.next_btn.setEnabled(False)
-        self.next_btn.clicked.connect(self.next_step)
-        self.steps = [
-            "Posicionar sensores em repouso",
-            "Flexionar até máximo confortável",
-            "Retornar ao neutro",
-            "Gerando curva...",
-            "Concluído"
-        ]
-        self.current_step = -1
-        for w in (self.stage_label,self.progress,self.start_btn,self.next_btn):
-            layout.addWidget(w)
-        layout.addStretch()
-    def start_flow(self):
-        self.current_step = 0
-        self.update_ui()
-        self.next_btn.setEnabled(True)
-        self.start_btn.setEnabled(False)
-    def next_step(self):
-        if self.current_step < len(self.steps)-1:
-            self.current_step +=1
-            self.update_ui()
-        if self.current_step == len(self.steps)-1:
-            self.next_btn.setEnabled(False)
-    def update_ui(self):
-        self.stage_label.setText(self.steps[self.current_step])
-        self.progress.setValue(int((self.current_step+1)/len(self.steps)*100))
+        self.sensors = sensors
+        self.sensor_backend = sensor_backend
+        self.latest_readings = latest_readings
+        self._get_theme = theme_accessor  # função que retorna tema atual 'Dark'/'Light'
+        from Modules.plot_manager import PlotManager
+        outer = QVBoxLayout(self); outer.setSpacing(12)
+
+        # Header controles (toggle segmentado + combo)
+        ctrl_bar = QHBoxLayout(); ctrl_bar.setSpacing(12)
+        self.segmented_mode = QFrame(); self.segmented_mode.setObjectName('Segmented')
+        seg_lay = QHBoxLayout(self.segmented_mode); seg_lay.setContentsMargins(4,4,4,4); seg_lay.setSpacing(2)
+        self.mode_toggle_flex = QPushButton("Flex"); self.mode_toggle_fsr = QPushButton("FSR")
+        for b in (self.mode_toggle_flex, self.mode_toggle_fsr):
+            b.setCheckable(True); b.clicked.connect(self._mode_clicked)
+        self.mode_toggle_flex.setChecked(True)
+        self.mode_toggle_flex.setProperty('selected','true')
+        self.mode_toggle_fsr.setProperty('selected','false')
+        seg_lay.addWidget(self.mode_toggle_flex); seg_lay.addWidget(self.mode_toggle_fsr)
+        ctrl_bar.addWidget(self.segmented_mode)
+        ctrl_bar.addSpacing(10)
+
+        self.combo_sensor = QComboBox(); ctrl_bar.addWidget(QLabel("Sensor:")); ctrl_bar.addWidget(self.combo_sensor)
+
+        ctrl_bar.addStretch()
+        outer.addLayout(ctrl_bar)
+
+        # Container plot
+        self.plot_frame = QFrame(); self.plot_frame.setObjectName('CalibPlotFrame')
+        self.plot_frame.setMinimumHeight(380)
+        outer.addWidget(self.plot_frame, 1)
+
+        # Instancia PlotManager com os sensores relevantes (todos para reaproveitar legendas/cores)
+        self.calib_plot = PlotManager(self.plot_frame, sensors={k: v for k,v in sensors.items() if not k.startswith('goniometro')}, displayed_sensors=set())
+        self.calib_plot.set_show_legend(True)
+        self.calib_plot.set_show_voltage(True)
+        self.calib_plot.set_mode('flex')
+
+        # Botões calibração
+        btn_row = QHBoxLayout(); btn_row.setSpacing(12)
+        self.btn_start = QPushButton("Iniciar Gravação")
+        self.btn_stop = QPushButton("Parar")
+        self.btn_save = QPushButton("Calibrar")
+        # Labels contador (tempo e amostras) - lógica preenchida posteriormente
+        self.lbl_time = QLabel("Tempo: 0.0s")
+        self.lbl_samples = QLabel("Amostras: 0")
+        self.lbl_time.setMinimumWidth(90); self.lbl_samples.setMinimumWidth(110)
+        self.btn_stop.setEnabled(False)
+        self.btn_save.setEnabled(False)
+        for b in (self.btn_start,self.btn_stop,self.btn_save):
+            b.setProperty('class','action')
+        self.btn_start.clicked.connect(self.start_record)
+        self.btn_stop.clicked.connect(self.stop_record)
+        self.btn_save.clicked.connect(self.save_calibration)
+        btn_row.addWidget(self.btn_start)
+        btn_row.addWidget(self.btn_stop)
+        btn_row.addWidget(self.btn_save)
+        btn_row.addStretch()
+        btn_row.addWidget(self.lbl_time)
+        btn_row.addWidget(self.lbl_samples)
+        outer.addLayout(btn_row)
+
+        # Estado
+        self.recording = False
+        self.record_points: List[tuple] = []
+        self.record_timer = QTimer(self); self.record_timer.timeout.connect(self._collect_point)
+        self.record_start_time = None
+
+        self._populate_combo()
+        self._apply_display_selection()
+        # Aplicar tema atual
+        self.apply_theme(self._get_theme())
+
+    def _populate_combo(self):
+        self.combo_sensor.blockSignals(True)
+        self.combo_sensor.clear()
+        if self.is_flex_mode():
+            flex_names = sorted([n for n in self.sensors.keys() if n.startswith('flex')])
+            self.combo_sensor.addItems(flex_names)
+        else:
+            fsr_names = sorted([n for n in self.sensors.keys() if n.startswith('fsr')])
+            self.combo_sensor.addItems(fsr_names)
+        self.combo_sensor.blockSignals(False)
+        self.combo_sensor.currentIndexChanged.connect(self._apply_display_selection)
+
+    def _mode_clicked(self):
+        if self.sender() == self.mode_toggle_flex:
+            self.mode_toggle_flex.setChecked(True); self.mode_toggle_fsr.setChecked(False)
+            self.mode_toggle_flex.setProperty('selected','true'); self.mode_toggle_fsr.setProperty('selected','false')
+            self.calib_plot.set_mode('flex')
+        else:
+            self.mode_toggle_flex.setChecked(False); self.mode_toggle_fsr.setChecked(True)
+            self.mode_toggle_flex.setProperty('selected','false'); self.mode_toggle_fsr.setProperty('selected','true')
+            self.calib_plot.set_mode('fsr')
+        for b in (self.mode_toggle_flex,self.mode_toggle_fsr):
+            b.style().unpolish(b); b.style().polish(b); b.update()
+        self._populate_combo()
+        self._apply_display_selection()
+        self.apply_theme(self._get_theme())
+
+    def is_flex_mode(self):
+        return self.mode_toggle_flex.isChecked()
+
+    def _apply_display_selection(self):
+        if self.combo_sensor.count()==0:
+            return
+        sel = self.combo_sensor.currentText()
+        if self.is_flex_mode():
+            displayed = {sel, 'goniometer'}
+        else:
+            displayed = {sel}
+        self.calib_plot.update_displayed_sensors(displayed)
+
+    def start_record(self):
+        if not self.is_flex_mode():
+            # gravação só para flex no momento
+            return
+        if self.combo_sensor.count()==0:
+            return
+        self.record_points.clear()
+        self.recording = True
+        self.record_start_time = time.time()
+        self.btn_start.setEnabled(False)
+        self.btn_stop.setEnabled(True)
+        self.btn_save.setEnabled(False)
+        self.lbl_time.setText("Tempo: 0.0s")
+        self.lbl_samples.setText("Amostras: 0")
+        self.record_timer.start(50)  # 20 Hz
+
+    def stop_record(self):
+        if not self.recording:
+            return
+        self.recording = False
+        self.record_timer.stop()
+        self.btn_start.setEnabled(True)
+        self.btn_stop.setEnabled(False)
+        self.btn_save.setEnabled(len(self.record_points) > 5)
+        # Congela contador final
+        if self.record_start_time:
+            elapsed = time.time() - self.record_start_time
+            self.lbl_time.setText(f"Tempo: {elapsed:.1f}s")
+        self.lbl_samples.setText(f"Amostras: {len(self.record_points)}")
+
+    def _collect_point(self):
+        if not self.recording:
+            return
+        sel = self.combo_sensor.currentText()
+        voltage = self.latest_readings.get(f"{sel}_voltage", 0.0)
+        angle = self.latest_readings.get('goniometer_angle', 0.0)
+        self.record_points.append((voltage, angle))
+        # Atualiza contadores
+        if self.record_start_time:
+            elapsed = time.time() - self.record_start_time
+            self.lbl_time.setText(f"Tempo: {elapsed:.1f}s")
+        self.lbl_samples.setText(f"Amostras: {len(self.record_points)}")
+
+    def update_live_plot(self, current_time: float):
+        """Atualiza o plot de calibração com as leituras mais recentes compartilhadas.
+
+        Reutiliza a lógica do PlotManager como no modo unificado.
+        """
+        if not hasattr(self, 'calib_plot'):
+            return
+        try:
+            # Garante modo correto conforme toggle
+            self.calib_plot.set_mode('flex' if self.is_flex_mode() else 'fsr')
+            self.calib_plot.update(current_time, self.latest_readings)
+        except RuntimeError:
+            pass
+
+    def save_calibration(self):
+        if not self.record_points:
+            return
+        sel = self.combo_sensor.currentText()
+        # Ordena por ângulo crescente antes de ajustar
+        ordered = sorted(self.record_points, key=lambda x: x[1])
+        # Salva
+        import os, csv
+        os.makedirs('calibrations/flex', exist_ok=True)
+        path = f"calibrations/flex/calibration_{sel}.csv"
+        with open(path, 'w', newline='') as f:
+            w = csv.writer(f)
+            w.writerow(['Voltage','Angle'])
+            w.writerows(ordered)
+        # Aplica no backend
+        if sel in self.sensor_backend:
+            self.sensor_backend[sel].calibrate_with_data_points(ordered)
+        self.btn_save.setEnabled(False)
+        self.btn_start.setEnabled(True)
+
+    def apply_theme(self, theme: str):
+        # Repassa para plot
+        if hasattr(self, 'calib_plot'):
+            self.calib_plot.apply_theme(theme)
+        # Ajusta seleção
+        fg_sel = '#ffffff' if theme=='Dark' else '#1e1e1e'
+        for b in (self.mode_toggle_flex,self.mode_toggle_fsr):
+            if b.property('selected')=='true':
+                b.setStyleSheet('font-weight:600;')
+            else:
+                b.setStyleSheet('')
+        self.update()
 
 class TestsPage(QWidget):
     def __init__(self):
@@ -879,7 +1059,7 @@ class MainWindow(QMainWindow):
         self.page_dashboard = DashboardPage()
         self.page_patients = PatientsPage(MOCK_PATIENTS)
         self.page_sensors = SensorsPage(self.sensors)
-        self.page_calib = CalibrationPage()
+        self.page_calib = CalibrationPage(self.sensors, self.sensor_backend, self.latest_readings, lambda: self.current_theme)
         self.page_tests = TestsPage()
         self.page_games = GamesPage(self._launch_flybird)
         self.page_history = HistoryPage()
@@ -897,6 +1077,8 @@ class MainWindow(QMainWindow):
 
         # Finaliza configuração pós construção básica
         self._post_setup()
+        # Carrega calibrações existentes (flex) se disponíveis
+        self._load_existing_calibrations()
 
     def _launch_flybird(self):
         try:
@@ -934,6 +1116,38 @@ class MainWindow(QMainWindow):
         self.apply_stylesheet()
         # Overlay de início (frontend)
         self.show_startup_overlay()
+
+    def _load_existing_calibrations(self):
+        """Varre diretório calibrations/flex/ e aplica calibrações para sensores flex existentes.
+
+        Formato esperado: calibrations/flex/calibration_<sensor>.csv
+        Ex: calibration_flex6.csv
+        """
+        base_dir = os.path.join(os.getcwd(), 'calibrations', 'flex')
+        if not os.path.isdir(base_dir):
+            return
+        loaded = 0
+        try:
+            for fname in os.listdir(base_dir):
+                if not fname.startswith('calibration_') or not fname.endswith('.csv'):
+                    continue
+                sensor_name = fname[len('calibration_'):-4]  # remove prefixo e .csv
+                # Ignora arquivos de fsr por enquanto (future: calibrar força)
+                if sensor_name not in self.sensor_backend:
+                    continue
+                path = os.path.join(base_dir, fname)
+                try:
+                    ok = self.sensor_backend[sensor_name].load_calibration_from_file(path)
+                    if ok:
+                        loaded += 1
+                except Exception as e:
+                    if hasattr(self, 'page_dev'):
+                        self.page_dev.add_line(f"Falha carregar calib {sensor_name}: {e}")
+            if loaded and hasattr(self, 'page_dev'):
+                self.page_dev.add_line(f"{loaded} calibrações aplicadas no startup.")
+        except Exception as e:
+            if hasattr(self, 'page_dev'):
+                self.page_dev.add_line(f"Erro ao varrer calibrações: {e}")
 
     def apply_stylesheet(self):
         # Define paletas
@@ -1111,6 +1325,12 @@ class MainWindow(QMainWindow):
         # Atualiza painel antigo se ativo
         if hasattr(self, 'page_sensors'):
             self.page_sensors.update_unified_plot(current_time, self.latest_readings)
+        # Atualiza plot de calibração em tempo real
+        if hasattr(self, 'page_calib'):
+            try:
+                self.page_calib.update_live_plot(current_time)
+            except Exception:
+                pass
 
     # ---------- Extensão Config (BLE / Filter) ----------
     def _extend_settings_with_ble_and_filter(self):
