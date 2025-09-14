@@ -62,7 +62,7 @@ class PlotManager:
             self.force_lines[sid], = self.ax_detail.plot([], [], label=sid.upper(), color=sensor_colors[sid])
 
         # Goniômetro
-        self.line_goniometer_angle, = self.ax_detail.plot([], [], label="GONIÔMETRO", color="black", linestyle='solid')
+        self.line_goniometer_angle, = self.ax_detail.plot([], [], label="G", color="black", linestyle='solid')
 
         # Ajuste inicial dos eixos
         self.ax_voltage.set_title("Tensão (V) x Tempo")

@@ -84,3 +84,10 @@ Melhorias para fazer no protoripo:
 - Todos os dados dos pacientes deve ser salvos durante a sessão. Inclusive quando estiver jogando. 
 - na tela de jogos deverá ter um submenu chamado configurar falanges. onde nela eu vou poder configurar qual sensor está ligado em qual junção interfalÂngica. porque agora os sensores estão avulsos.
 
+
+
+
+-Mostrar visualmente (ex: badge) quando um sensor já tem calibração carregada.
+- Adicionar botão “Limpar Calibração”.
+- Dashboard mostrando conectado sempre para Bluetooth.
+
