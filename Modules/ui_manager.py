@@ -156,10 +156,8 @@ class SensorsPage(QWidget):
     def __init__(self, sensors: Dict[str, SensorState]):
         super().__init__(); self.sensors = sensors
         from PyQt6.QtWidgets import QCheckBox  # garante escopo local antes do uso
-        self.mode = 'unificado'  # padrão agora é unificado
-        self.show_tensao = False
-        self.flex_hidden = False
-        self.fsr_hidden = False
+        # Modos restantes: 'cartoes' e 'unificado' (plot consolidado antigo)
+        self.mode = 'unificado'
         # Conjunto de nomes habilitados (para modo unificado)
         # Ajuste: deixar 'flex8' desmarcado/inativo por padrão (solicitação usuário)
         self.enabled_names = {n for n in sensors.keys() if n != 'flex8'}
@@ -173,12 +171,14 @@ class SensorsPage(QWidget):
         # Segmented principal (visualização)
         self.segmented = QFrame(); self.segmented.setObjectName("Segmented")
         seg_lay = QHBoxLayout(self.segmented); seg_lay.setContentsMargins(4,4,4,4); seg_lay.setSpacing(2)
-        self.btn_seg_unificado = QPushButton("Unificado"); self.btn_seg_cartoes = QPushButton("Cartões"); self.btn_seg_antigo = QPushButton("Antigo")
-        for b in (self.btn_seg_unificado, self.btn_seg_cartoes, self.btn_seg_antigo):
+        # Botões: Cartões e Unificado (antigo plot)
+        self.btn_seg_cartoes = QPushButton("Cartões"); self.btn_seg_unificado_plot = QPushButton("Unificado")
+        for b in (self.btn_seg_cartoes, self.btn_seg_unificado_plot):
             b.setCheckable(True); b.clicked.connect(self._segmented_clicked)
-        self.btn_seg_unificado.setChecked(True); self.btn_seg_unificado.setProperty("selected","true")
-        self.btn_seg_cartoes.setProperty("selected","false"); self.btn_seg_antigo.setProperty("selected","false")
-        seg_lay.addWidget(self.btn_seg_unificado); seg_lay.addWidget(self.btn_seg_cartoes); seg_lay.addWidget(self.btn_seg_antigo)
+        # Iniciar no modo Unificado (plot)
+        self.btn_seg_unificado_plot.setChecked(True); self.btn_seg_unificado_plot.setProperty('selected','true')
+        self.btn_seg_cartoes.setProperty('selected','false')
+        seg_lay.addWidget(self.btn_seg_unificado_plot); seg_lay.addWidget(self.btn_seg_cartoes)
 
         # Segmented secundário (modo flex/fsr do plot antigo)
         self.segmented_old_mode = QFrame(); self.segmented_old_mode.setObjectName("Segmented")
@@ -195,7 +195,7 @@ class SensorsPage(QWidget):
         seg_row.addWidget(self.segmented_old_mode, 0)
         seg_row.addStretch()
 
-        # Grupo opções modo antigo (Legenda / Tensão) – fica à direita e só aparece no modo 'antigo'
+    # Grupo opções modo unificado (ex-antigo) – legenda / tensão
         self.old_mode_opts = QFrame(); self.old_mode_opts.setObjectName('OldModeOpts')
         omo_lay = QHBoxLayout(self.old_mode_opts); omo_lay.setContentsMargins(0,0,0,0); omo_lay.setSpacing(10)
         self.chk_old_legend = QCheckBox("Legenda"); self.chk_old_legend.setChecked(True); self.chk_old_legend.setProperty('class','pretty')
@@ -204,10 +204,6 @@ class SensorsPage(QWidget):
         self.chk_old_voltage.stateChanged.connect(self._old_toggle_voltage)
         omo_lay.addWidget(self.chk_old_legend); omo_lay.addWidget(self.chk_old_voltage)
         self.old_mode_opts.setVisible(False)
-
-        # Checkbox tensão (apenas no unificado/cartões) permanece à direita quando não for modo antigo
-        self.tensao_cb = QCheckBox("Mostrar Tensão"); self.tensao_cb.setProperty('class','pretty'); self.tensao_cb.stateChanged.connect(self.toggle_tensao)
-        seg_row.addWidget(self.tensao_cb, 0, Qt.AlignmentFlag.AlignRight)
         seg_row.addWidget(self.old_mode_opts, 0, Qt.AlignmentFlag.AlignRight)
         main_lay.addLayout(seg_row)
 
@@ -263,72 +259,17 @@ class SensorsPage(QWidget):
         cards_lay.addStretch()
         self.mode_stack.addWidget(page_cards)
 
-        # --- Página Unificada ---
-        page_uni = QWidget(); uni_outer = QVBoxLayout(page_uni); uni_outer.setSpacing(14)
-        # Scroll area (caso aumente)
-        scroll = QScrollArea(); scroll.setWidgetResizable(True)
-        sc_body = QWidget(); scroll_lay = QVBoxLayout(sc_body); scroll_lay.setSpacing(16)
-        scroll.setWidget(sc_body)
+        # (Página unificada antiga removida)
 
-        # Multi plot widgets
-        flex_names_unified = [n for n in sensors if n.startswith('flex')]
-        if GONIOMETRO_NAME in sensors:
-            flex_names_unified = flex_names_unified + [GONIOMETRO_NAME]
-        self.multi_flex = MultiSensorPlot(flex_names_unified, sensors, title="Flex / Goniômetro - Ângulo", color_seed="#7e57c2", enabled_names=self.enabled_names)
-        self.multi_flex_t = MultiSensorPlot(flex_names_unified, sensors, title="Flex / Goniômetro - Tensão", color_seed="#3949ab", enabled_names=self.enabled_names)
-        self.multi_fsr = MultiSensorPlot([n for n in sensors if n.startswith('fsr')], sensors, title="FSR - Ângulo", color_seed="#26c6da", enabled_names=self.enabled_names)
-        self.multi_fsr_t = MultiSensorPlot([n for n in sensors if n.startswith('fsr')], sensors, title="FSR - Tensão", color_seed="#00838f", enabled_names=self.enabled_names)
-
-        # Controles de ocultar
-        self.btn_hide_flex = QPushButton("Ocultar Flex")
-        self.btn_hide_flex.clicked.connect(self.toggle_flex_visible)
-        self.btn_hide_fsr = QPushButton("Ocultar FSR")
-        self.btn_hide_fsr.clicked.connect(self.toggle_fsr_visible)
-
-        block_flex = QVBoxLayout(); wrap_flex = QFrame(); wrap_flex.setObjectName("SensorCard"); wrap_flex.setLayout(block_flex)
-        ctl_flex = QHBoxLayout(); ctl_flex.addWidget(QLabel("Painel Flex")); ctl_flex.addStretch(); ctl_flex.addWidget(self.btn_hide_flex)
-        block_flex.addLayout(ctl_flex)
-        self.flex_pair = QHBoxLayout(); self.flex_pair.addWidget(self.multi_flex, 1)
-        self.flex_pair.addWidget(self.multi_flex_t, 1); self.multi_flex_t.setVisible(False)
-        block_flex.addLayout(self.flex_pair)
-
-        block_fsr = QVBoxLayout(); wrap_fsr = QFrame(); wrap_fsr.setObjectName("SensorCard"); wrap_fsr.setLayout(block_fsr)
-        ctl_fsr = QHBoxLayout(); ctl_fsr.addWidget(QLabel("Painel FSR")); ctl_fsr.addStretch(); ctl_fsr.addWidget(self.btn_hide_fsr)
-        block_fsr.addLayout(ctl_fsr)
-        self.fsr_pair = QHBoxLayout(); self.fsr_pair.addWidget(self.multi_fsr, 1)
-        self.fsr_pair.addWidget(self.multi_fsr_t, 1); self.multi_fsr_t.setVisible(False)
-        block_fsr.addLayout(self.fsr_pair)
-
-        # Checkboxes agora dentro de cada painel
-        self.unified_checks_flex: Dict[str, QCheckBox] = {}
-        self.unified_checks_fsr: Dict[str, QCheckBox] = {}
-        # Flex + goniômetro
-        flex_checks_wrap = QWidget(); flex_checks_lay = QHBoxLayout(flex_checks_wrap); flex_checks_lay.setContentsMargins(4,0,4,4); flex_checks_lay.setSpacing(8)
-        for name in flex_names_unified:
-            cb = QCheckBox(name)
-            cb.setChecked(False if name == 'flex8' else True)
-            cb.stateChanged.connect(self.update_unified_enabled)
-            self.unified_checks_flex[name] = cb; flex_checks_lay.addWidget(cb)
-        flex_checks_lay.addStretch(); block_flex.addWidget(flex_checks_wrap)
-        # FSR
-        fsr_checks_wrap = QWidget(); fsr_checks_lay = QHBoxLayout(fsr_checks_wrap); fsr_checks_lay.setContentsMargins(4,0,4,4); fsr_checks_lay.setSpacing(8)
-        for name in [n for n in sensors if n.startswith('fsr')]:
-            cb = QCheckBox(name); cb.setChecked(True); cb.stateChanged.connect(self.update_unified_enabled)
-            self.unified_checks_fsr[name] = cb; fsr_checks_lay.addWidget(cb)
-        fsr_checks_lay.addStretch(); block_fsr.addWidget(fsr_checks_wrap)
-        scroll_lay.addWidget(wrap_flex)
-        scroll_lay.addWidget(wrap_fsr)
-        scroll_lay.addStretch()
-        uni_outer.addWidget(scroll)
-        self.mode_stack.addWidget(page_uni)
-
-        # --- Página Antiga (Matplotlib) ---
+    # --- Página Unificado (plot antigo Matplotlib) ---
         page_old = QWidget(); old_lay = QVBoxLayout(page_old); old_lay.setContentsMargins(0,0,0,0)
         from Modules.plot_manager import PlotManager  # import local para evitar custos se não usar
         self.old_plot_container = QFrame(); old_plot_layout = QVBoxLayout(self.old_plot_container); old_plot_layout.setContentsMargins(0,0,0,0)
         old_lay.addWidget(self.old_plot_container,1)
-        # Checkboxes de seleção de sinais agora abaixo do gráfico
-        sel_row = QHBoxLayout(); sel_row.setSpacing(10)
+        # Checkboxes de seleção de sinais agora abaixo do gráfico (container dedicado)
+        sel_wrap = QFrame(); sel_wrap.setObjectName('UnifiedChecksBar')
+        sel_wrap.setStyleSheet('#UnifiedChecksBar { border-top: 1px solid rgba(255,255,255,40); padding: 6px 8px; }')
+        sel_row = QHBoxLayout(sel_wrap); sel_row.setContentsMargins(4,4,4,4); sel_row.setSpacing(10)
         from PyQt6.QtWidgets import QCheckBox as _QCB2
         self.old_checks = {}
         gchk = _QCB2('goniometer'); gchk.setChecked(True); gchk.setProperty('class','pretty'); sel_row.addWidget(gchk); self.old_checks['goniometer']=gchk
@@ -336,37 +277,38 @@ class SensorsPage(QWidget):
             c = _QCB2(sid)
             c.setChecked(False if sid == 'flex8' else True)
             c.setProperty('class','pretty'); sel_row.addWidget(c); self.old_checks[sid]=c
-        sel_row.addStretch(); old_lay.addLayout(sel_row)
-        self.old_plot = PlotManager(
+        sel_row.addStretch(); old_lay.addWidget(sel_wrap)
+        # Renomeado: old_plot -> unified_plot
+        self.unified_plot = PlotManager(
             self.old_plot_container,
             sensors={k: v for k, v in sensors.items() if not k.startswith('goniometro')},
             # 'flex8' inicia oculto
             displayed_sensors=set(['goniometer'] + [k for k in sensors.keys() if k != 'flex8'])
         )
+        # Alias de compatibilidade temporário (caso outras partes externas ainda usem old_plot)
+        self.old_plot = self.unified_plot
         def _old_update_checks():
             displayed = {k for k, cb in self.old_checks.items() if cb.isChecked()}
-            self.old_plot.update_displayed_sensors(displayed)
+            self.unified_plot.update_displayed_sensors(displayed)
         for cb in self.old_checks.values():
             cb.stateChanged.connect(_old_update_checks)
-        # Adiciona página antiga ao QStackedWidget (index 2)
         self.mode_stack.addWidget(page_old)
-        # Define estado inicial realmente como 'unificado' (index 1) conforme self.mode
+        # Agora só duas páginas: 0=cartões, 1=unificado (plot)
         self.mode_stack.setCurrentIndex(1)
-        self.tensao_cb.setVisible(True)
-        self.old_mode_opts.setVisible(False)
+        self.old_mode_opts.setVisible(True)
 
     def _old_toggle_legend(self):
-        if hasattr(self, 'old_plot'):
-            self.old_plot.set_show_legend(self.chk_old_legend.isChecked())
+        if hasattr(self, 'unified_plot'):
+            self.unified_plot.set_show_legend(self.chk_old_legend.isChecked())
 
     def _old_toggle_voltage(self):
-        if hasattr(self, 'old_plot'):
-            self.old_plot.set_show_voltage(self.chk_old_voltage.isChecked())
+        if hasattr(self, 'unified_plot'):
+            self.unified_plot.set_show_voltage(self.chk_old_voltage.isChecked())
         # Nada mais aqui; código de inicialização removido
 
     def _old_set_mode(self, mode: str):
-        if hasattr(self,'old_plot'):
-            self.old_plot.set_mode(mode)
+        if hasattr(self,'unified_plot'):
+            self.unified_plot.set_mode(mode)
         self._old_mode_cached = mode
         if hasattr(self,'btn_old_flex'):
             if mode == 'flex':
@@ -389,26 +331,7 @@ class SensorsPage(QWidget):
         # Usado se ainda houver chamadas externas
         self._set_mode('unificado' if self.mode=='cartoes' else 'cartoes')
 
-    def toggle_tensao(self):
-        self.show_tensao = self.tensao_cb.isChecked()
-        self.multi_flex_t.setVisible(self.show_tensao)
-        self.multi_fsr_t.setVisible(self.show_tensao)
-        # Ajusta textos
-        self.multi_flex.title = "Flex - Ângulo" if not self.show_tensao else "Flex - Ângulo"
-        self.multi_fsr.title = "FSR - Ângulo" if not self.show_tensao else "FSR - Ângulo"
-        self.update()
-
-    def toggle_flex_visible(self):
-        self.flex_hidden = not self.flex_hidden
-        self.multi_flex.setVisible(not self.flex_hidden)
-        self.multi_flex_t.setVisible(not self.flex_hidden and self.show_tensao)
-        self.btn_hide_flex.setText("Mostrar Flex" if self.flex_hidden else "Ocultar Flex")
-
-    def toggle_fsr_visible(self):
-        self.fsr_hidden = not self.fsr_hidden
-        self.multi_fsr.setVisible(not self.fsr_hidden)
-        self.multi_fsr_t.setVisible(not self.fsr_hidden and self.show_tensao)
-        self.btn_hide_fsr.setText("Mostrar FSR" if self.fsr_hidden else "Ocultar FSR")
+    # (Funções de plot unificado removidas)
 
     def update_visible(self):
         for name, cb in self.checks.items():
@@ -416,27 +339,15 @@ class SensorsPage(QWidget):
                 self.plots[name].setVisible(cb.isChecked())
 
     def push_value(self, name: str, v: float):
-        # Modo cartões
         if name in self.plots:
             self.plots[name].push(v)
-        # Modo unificado – as curvas acessam diretamente sensor state ao desenhar, então basta atualizar
-        if name.startswith('flex'):
-            self.multi_flex.update()
-            self.multi_flex_t.update()
-        elif name.startswith('fsr'):
-            self.multi_fsr.update()
-            self.multi_fsr_t.update()
-        else:  # goniômetro
-            self.multi_flex.update(); self.multi_flex_t.update()
 
     def _segmented_clicked(self):
         sender = self.sender()
-        if sender == self.btn_seg_unificado:
+        if sender == self.btn_seg_unificado_plot:
             self._set_mode('unificado')
         elif sender == self.btn_seg_cartoes:
             self._set_mode('cartoes')
-        else:
-            self._set_mode('antigo')
 
     def _set_mode(self, target: str):
         if target == self.mode:
@@ -444,43 +355,28 @@ class SensorsPage(QWidget):
         self.mode = target
         if self.mode == 'unificado':
             self.mode_stack.setCurrentIndex(1)
-            self.tensao_cb.setVisible(True)
-            self.segmented_old_mode.setVisible(False)
-            self.old_mode_opts.setVisible(False)
-            self.btn_seg_unificado.setChecked(True); self.btn_seg_cartoes.setChecked(False); self.btn_seg_antigo.setChecked(False)
-            self.btn_seg_unificado.setProperty('selected','true'); self.btn_seg_cartoes.setProperty('selected','false'); self.btn_seg_antigo.setProperty('selected','false')
-        elif self.mode == 'cartoes':
-            self.mode_stack.setCurrentIndex(0)
-            self.tensao_cb.setVisible(False)
-            self.segmented_old_mode.setVisible(False)
-            self.old_mode_opts.setVisible(False)
-            self.btn_seg_unificado.setChecked(False); self.btn_seg_cartoes.setChecked(True); self.btn_seg_antigo.setChecked(False)
-            self.btn_seg_unificado.setProperty('selected','false'); self.btn_seg_cartoes.setProperty('selected','true'); self.btn_seg_antigo.setProperty('selected','false')
-        else:  # antigo
-            self.mode_stack.setCurrentIndex(2)
-            self.tensao_cb.setVisible(False)
             self.segmented_old_mode.setVisible(True)
             self.old_mode_opts.setVisible(True)
-            self.btn_seg_unificado.setChecked(False); self.btn_seg_cartoes.setChecked(False); self.btn_seg_antigo.setChecked(True)
-            self.btn_seg_unificado.setProperty('selected','false'); self.btn_seg_cartoes.setProperty('selected','false'); self.btn_seg_antigo.setProperty('selected','true')
-        for b in (self.btn_seg_unificado, self.btn_seg_cartoes, self.btn_seg_antigo):
+            self.btn_seg_unificado_plot.setChecked(True); self.btn_seg_cartoes.setChecked(False)
+            self.btn_seg_unificado_plot.setProperty('selected','true'); self.btn_seg_cartoes.setProperty('selected','false')
+        else:
+            self.mode_stack.setCurrentIndex(0)
+            self.segmented_old_mode.setVisible(False)
+            self.old_mode_opts.setVisible(False)
+            self.btn_seg_unificado_plot.setChecked(False); self.btn_seg_cartoes.setChecked(True)
+            self.btn_seg_unificado_plot.setProperty('selected','false'); self.btn_seg_cartoes.setProperty('selected','true')
+        for b in (self.btn_seg_unificado_plot, self.btn_seg_cartoes):
             b.style().unpolish(b); b.style().polish(b); b.update()
         self.update()
 
-    def update_old_plot(self, current_time: float, latest_readings: dict):
-        if self.mode == 'antigo' and hasattr(self,'old_plot'):
+    def update_unified_plot(self, current_time: float, latest_readings: dict):
+        if self.mode == 'unificado' and hasattr(self,'unified_plot'):
             try:
                 mode_txt = getattr(self, '_old_mode_cached', 'flex')
-                self.old_plot.set_mode(mode_txt)
-                self.old_plot.update(current_time, latest_readings)
+                self.unified_plot.set_mode(mode_txt)
+                self.unified_plot.update(current_time, latest_readings)
             except RuntimeError:
                 pass
-
-    def update_unified_enabled(self):
-        enabled_flex = {n for n, cb in self.unified_checks_flex.items() if cb.isChecked()}
-        enabled_fsr = {n for n, cb in self.unified_checks_fsr.items() if cb.isChecked()}
-        self.enabled_names = enabled_flex | enabled_fsr
-        self.multi_flex.update(); self.multi_flex_t.update(); self.multi_fsr.update(); self.multi_fsr_t.update()
 
 class MultiSensorPlot(QWidget):
     # Plot multi-sensores simples com filtragem dinâmica por conjunto habilitado.
@@ -1214,7 +1110,7 @@ class MainWindow(QMainWindow):
             self.page_dashboard.spark_fsr.push(sum(fsr_vals)/len(fsr_vals))
         # Atualiza painel antigo se ativo
         if hasattr(self, 'page_sensors'):
-            self.page_sensors.update_old_plot(current_time, self.latest_readings)
+            self.page_sensors.update_unified_plot(current_time, self.latest_readings)
 
     # ---------- Extensão Config (BLE / Filter) ----------
     def _extend_settings_with_ble_and_filter(self):
@@ -1412,8 +1308,8 @@ class MainWindow(QMainWindow):
         self.page_dev.add_line(f"Tema alterado para: {theme}")
         # Propaga tema para o plot antigo se existir
         try:
-            if hasattr(self, 'page_sensors') and hasattr(self.page_sensors, 'old_plot'):
-                self.page_sensors.old_plot.apply_theme(theme)
+            if hasattr(self, 'page_sensors') and hasattr(self.page_sensors, 'unified_plot'):
+                self.page_sensors.unified_plot.apply_theme(theme)
         except Exception:
             pass
 
