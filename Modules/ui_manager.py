@@ -1,20 +1,18 @@
 """
-Protótipo de UI em PyQt6 (isolado) para experimentação de UX/estética.
+Interface principal MarmSoft em PyQt6.
 
-Inclui (simulado):
- - Navegação lateral moderna
- - Dashboard com cartões, micro‑gráficos (sparklines) e logs
- - Monitor de sensores com cartões responsivos
- - Fluxo de calibração fake
- - Testes com métricas (MAE / RMSE / Corr) em tempo real
- - Dois minigames simples embutidos (pong / pulso animado)
- - Histórico (mock)
- - Configurações + seletor de tema rápido (Dark / Light)
- - Painel Dev (logs internos)
+Inclui:
+ - Navegação lateral
+ - Dashboard com cartões, sparklines e logs
+ - Monitor de sensores (cartões, unificado, modo clássico Matplotlib)
+ - Placeholders de Calibração e Testes
+ - Integração FlyBird
+ - Histórico / Config (Tema, BLE, Suavização) / Painel Dev
 
-Objetivo: refinar layout (cantos arredondados, sombras, top bar custom, paleta coesa)
-sem depender dos módulos reais ainda.
-Execute: python ui_prototipo.py
+Execução direta de teste:
+    python -m Modules.ui_manager
+ou via entry point principal:
+    python main.py
 """
 # ================== Imports & Modelos Básicos (restaurados) ==================
 from __future__ import annotations
@@ -901,7 +899,15 @@ class DevPage(QWidget):
 class MainWindow(QMainWindow):
     def __init__(self, sensors: Dict[str, object]=None, latest_readings: Dict[str,float]=None, goniometer=None):
         super().__init__()
-        self.setWindowTitle("MarmSoft Protótipo PyQt6 Moderno")
+        self.setWindowTitle("MarmSoft")
+        # Define ícone principal se disponível
+        try:
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # pasta marmsoft
+            icon_path = os.path.join(base_dir, 'assets', 'icon.png')
+            if os.path.isfile(icon_path):
+                self.setWindowIcon(QIcon(icon_path))
+        except Exception:
+            pass  # falha silenciosa não crítica
         self.resize(1500, 920)
         # Estado principal
         # Sensores backend (SensorData) e storage de leituras

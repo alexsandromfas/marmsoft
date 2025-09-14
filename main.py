@@ -1,9 +1,9 @@
 """Entry point atualizado para UI PyQt6.
 
 Esta versão desativa a antiga interface CustomTkinter (gui_manager.py) e inicializa
-o protótipo PyQt6 estendido. Mantém criação e calibração dos sensores para uso
+a interface PyQt6 consolidada. Mantém criação e calibração dos sensores para uso
 nas funcionalidades migradas (BLE, plots, calibração, testes) que serão
-acopladas progressivamente dentro de `ui_prototipo.MainWindow`.
+acopladas progressivamente dentro de `ui_manager.MainWindow`.
 """
 
 from PyQt6.QtWidgets import QApplication
@@ -11,7 +11,7 @@ from PyQt6.QtGui import QPalette, QColor
 import sys
 from Modules.sensor_data import SensorData
 from Modules.goniometer_manager import GoniometerManager
-from Modules import ui_prototipo  # import do módulo com MainWindow
+from Modules import ui_manager  # módulo renomeado (antes ui_prototipo)
 
 # -------- Criação e calibração de sensores (reutilizado) --------
 sensors = {f"flex{i}": SensorData() for i in range(1,9)}
@@ -48,7 +48,7 @@ def main():
     if goniometer.dll:
         goniometer.start_reading()
 
-    win = ui_prototipo.MainWindow(sensors=sensors, latest_readings=latest_readings, goniometer=goniometer)
+    win = ui_manager.MainWindow(sensors=sensors, latest_readings=latest_readings, goniometer=goniometer)
     win.show()
     sys.exit(app.exec())
 
