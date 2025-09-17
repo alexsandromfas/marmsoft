@@ -91,8 +91,8 @@ def main():
         # Mantém referência para evitar garbage collection
         app.win = win  # type: ignore
 
-    # Agenda abertura da janela principal em 3 segundos (3000 ms) ou imediata se sem splash
-    delay_ms = 3000 if splash else 0
+    # Agenda abertura da janela principal em 2 segundos (2000 ms) ou imediata se sem splash
+    delay_ms = 5000 if splash else 0
     QTimer.singleShot(delay_ms, _show_main)
 
     sys.exit(app.exec())

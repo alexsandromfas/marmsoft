@@ -31,6 +31,7 @@ from PyQt6.QtWidgets import (
     QProgressBar, QPushButton, QComboBox, QSpinBox, QFormLayout, QLineEdit,
     QTableView, QListWidget, QListWidgetItem, QMessageBox, QStackedWidget, QSlider
 )
+import json
 
 
 # ------------------ Dataclasses ------------------
@@ -930,7 +931,6 @@ class SettingsPage(QWidget):
         form.addRow("Aquisição (ms)", self.poll_spin)
         form.addRow("Render (ms)", self.render_spin)
         form.addRow("Tema", self.theme_combo)
-        form.addRow(QLabel("Protótipo – sem persistência ainda."))
 
 class DevPage(QWidget):
     def __init__(self):
@@ -1107,7 +1107,8 @@ class MainWindow(QMainWindow):
 
         # Log e BLE simulado
         self.fake_ble_connected = False
-        QTimer.singleShot(1500, self.simulate_ble_connect)
+        # Tenta autoconectar BLE com base na config (se disponível)
+        QTimer.singleShot(500, self._try_auto_reconnect_ble)
         # Logs iniciais
         self.page_dev.add_line("Aplicação iniciada (simulada)")
         self.page_dev.add_line("[INFO] Protótipo carregado")
@@ -1375,7 +1376,9 @@ class MainWindow(QMainWindow):
         # Estado
         self._ble_manager = None
         self._ble_device_list = []
-        self._ble_target_uuid = "abcdef01-1234-5678-1234-56789abcdef0"
+        # Carrega UUID do serviço pela config.json (fallback para definido)
+        self._ble_target_uuid = self._load_ble_service_uuid()
+        self._ble_last_device = self._load_last_ble_device()
         self._ble_thread = None
 
     def _alpha_changed(self, val: int):
@@ -1416,6 +1419,21 @@ class MainWindow(QMainWindow):
         for d in devices:
             self.list_ble.addItem(f"{d.name or 'Desconhecido'} ({d.address})")
         self.page_dev.add_line(f"Scan BLE concluído: {len(devices)} dispositivos")
+        # Se há um último dispositivo salvo, tenta conectar automaticamente
+        if getattr(self, '_auto_reconnect_pending', False) and getattr(self, '_auto_reconnect_target', ''):
+            target_addr = self._auto_reconnect_target
+            match = None
+            for d in devices:
+                if d.address == target_addr:
+                    match = d
+                    break
+            if match:
+                self.page_dev.add_line(f"Auto reconectar BLE: {match.address}")
+                self._connect_to_device(match)
+                self._auto_reconnect_pending = False
+            else:
+                # Agenda nova tentativa de scan em 1.5s
+                QTimer.singleShot(1500, self._auto_reconnect_scan)
 
     def _ble_connect(self):
         sel = self.list_ble.currentRow()
@@ -1423,6 +1441,9 @@ class MainWindow(QMainWindow):
             self.page_dev.add_line("Nenhum dispositivo selecionado")
             return
         device = self._ble_device_list[sel]
+        self._connect_to_device(device)
+
+    def _connect_to_device(self, device):
         from threading import Thread
         from Modules.ble_manager import BLEManager
         self.page_dev.add_line(f"Conectando a {device.address}...")
@@ -1461,7 +1482,10 @@ class MainWindow(QMainWindow):
         self._ble_thread.start()
         self.lbl_ble_status.setText(f"Status: Conectado ({device.address})")
         self.btn_ble_connect.setEnabled(False); self.btn_ble_disconnect.setEnabled(True)
-        self.page_dashboard.card_ble.update_value("Conectado")
+        # Atualiza o card de dashboard com o mesmo texto do status
+        self.page_dashboard.card_ble.update_value(f"Conectado ({device.address})")
+        # Persiste último dispositivo
+        self._save_last_ble_device(device.address)
 
     def _ble_disconnect(self):
         if self._ble_manager:
@@ -1469,7 +1493,8 @@ class MainWindow(QMainWindow):
             self._ble_manager = None
         self.lbl_ble_status.setText("Status: Desconectado")
         self.btn_ble_connect.setEnabled(True); self.btn_ble_disconnect.setEnabled(False)
-        self.page_dashboard.card_ble.update_value("OFF")
+        # Mantém o dashboard sincronizado com o status
+        self.page_dashboard.card_ble.update_value("Desconectado")
         self.page_dev.add_line("BLE desconectado")
 
     def update_dashboard(self):
@@ -1482,6 +1507,57 @@ class MainWindow(QMainWindow):
     def update_goniometer_status(self):
         status = "Conectado" if (self.goniometer and getattr(self.goniometer, 'dll', None)) else "Desconectado"
         self.page_dashboard.card_gonio.update_value(status)
+
+    # ---------- Config helpers ----------
+    def _config_path(self):
+        return os.path.join(os.getcwd(), 'config.json')
+    def _read_config(self):
+        try:
+            with open(self._config_path(), 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    def _write_config(self, data: dict):
+        try:
+            with open(self._config_path(), 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            if hasattr(self, 'page_dev'):
+                self.page_dev.add_line(f"Falha escrevendo config: {e}")
+    def _load_ble_service_uuid(self) -> str:
+        cfg = self._read_config()
+        return cfg.get('bleServiceUuid', 'abcdef01-1234-5678-1234-56789abcdef0')
+    def _load_last_ble_device(self) -> str:
+        cfg = self._read_config()
+        return cfg.get('lastBleDevice', '')
+    def _save_last_ble_device(self, address: str):
+        cfg = self._read_config()
+        cfg['lastBleDevice'] = address
+        if 'bleServiceUuid' not in cfg:
+            cfg['bleServiceUuid'] = self._ble_target_uuid
+        self._write_config(cfg)
+    def _try_auto_reconnect_ble(self):
+        # Status inicial consistente
+        self.lbl_ble_status.setText("Status: Desconectado")
+        self.page_dashboard.card_ble.update_value("Desconectado")
+        last = self._load_last_ble_device()
+        if not last:
+            return
+        # Dispara um scan e tenta reconectar ao encontrar (até 3 tentativas)
+        self._auto_reconnect_pending = True
+        self._auto_reconnect_attempts = 0
+        self._auto_reconnect_target = last
+        self._auto_reconnect_scan()
+
+    def _auto_reconnect_scan(self):
+        if getattr(self, '_auto_reconnect_attempts', 0) >= 3:
+            self.lbl_ble_status.setText("Status: Dispositivo não encontrado")
+            self.page_dashboard.card_ble.update_value("Dispositivo não encontrado")
+            self._auto_reconnect_pending = False
+            return
+        self._auto_reconnect_attempts += 1
+        self.page_dev.add_line(f"Auto-reconexão BLE tentativa {self._auto_reconnect_attempts}...")
+        self._ble_scan()
 
     # ------------------ Temas ------------------
     def change_theme(self, theme: str):
@@ -1558,8 +1634,31 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         if QMessageBox.question(self, "Sair", "Deseja realmente sair?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No) == QMessageBox.StandardButton.No:
             event.ignore()
-        else:
-            event.accept()
+            return
+        # Tenta encerrar BLE e goniômetro de forma limpa
+        try:
+            self._shutdown_ble()
+        except Exception:
+            pass
+        try:
+            if self.goniometer and getattr(self.goniometer, 'dll', None):
+                self.goniometer.stop_reading()
+        except Exception:
+            pass
+        event.accept()
+
+    def _shutdown_ble(self):
+        """Finaliza o loop BLE para evitar ficar ativo após fechar a janela."""
+        try:
+            if self._ble_manager:
+                self._ble_manager.stop_loop()
+                # Aguardar brevemente a thread terminar
+                if getattr(self, '_ble_thread', None):
+                    self._ble_thread.join(timeout=2.0)
+                self._ble_manager = None
+                self._ble_thread = None
+        except Exception:
+            pass
 
 # ------------------ Execução ------------------
 def main():
