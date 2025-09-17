@@ -622,6 +622,9 @@ class CalibrationPage(QWidget):
         self.btn_fsr_start.setVisible(is_fsr)
         self.btn_fsr_stop.setVisible(is_fsr)
         self.btn_import_fsr.setVisible(is_fsr)
+        # Contadores FSR só no modo FSR (evita duplicidade no Flex)
+        self.lbl_fsr_time.setVisible(is_fsr)
+        self.lbl_fsr_samples.setVisible(is_fsr)
         self.lbl_ref_name.setVisible(is_fsr)
         self.lbl_fsr_name.setVisible(is_fsr)
         self.btn_align.setVisible(is_fsr)
@@ -727,6 +730,11 @@ class CalibrationPage(QWidget):
         # Repassa para plot
         if hasattr(self, 'calib_plot'):
             self.calib_plot.apply_theme(theme)
+        # Atualiza também o gráfico de sobreposição FSR para refletir o tema
+        try:
+            self._update_fsr_overlay_plot()
+        except Exception:
+            pass
         # Ajusta seleção
         fg_sel = '#ffffff' if theme=='Dark' else '#1e1e1e'
         for b in (self.mode_toggle_flex,self.mode_toggle_fsr):
@@ -769,6 +777,9 @@ class CalibrationPage(QWidget):
         self.fsr_rec_start_t = time.time()
         self.btn_fsr_start.setEnabled(False)
         self.btn_fsr_stop.setEnabled(True)
+        # Zera contadores na UI
+        self.lbl_fsr_time.setText("Tempo: 0.0s")
+        self.lbl_fsr_samples.setText("Amostras: 0")
         self.fsr_rec_timer.start(100)  # 0.1s
 
     def _fsr_stop(self):
@@ -795,8 +806,8 @@ class CalibrationPage(QWidget):
             # finaliza contadores
             if self.fsr_rec_start_t:
                 elapsed = time.time() - self.fsr_rec_start_t
-                self.lbl_time.setText(f"Tempo: {elapsed:.1f}s")
-            self.lbl_samples.setText(f"Amostras: {len(self.fsr_points)}")
+                self.lbl_fsr_time.setText(f"Tempo: {elapsed:.1f}s")
+            self.lbl_fsr_samples.setText(f"Amostras: {len(self.fsr_points)}")
             self.fsr_rec_loaded = ([t for t, _ in self.fsr_points], [v for _, v in self.fsr_points])
             self._update_fsr_overlay_plot()
         except Exception as e:
@@ -818,6 +829,9 @@ class CalibrationPage(QWidget):
         else:
             # v já está invertido na ingestão BLE (latest_readings)
             self.fsr_points.append((tr, v))
+        # Atualiza contadores na UI (FSR)
+        self.lbl_fsr_time.setText(f"Tempo: {tr:.1f}s")
+        self.lbl_fsr_samples.setText(f"Amostras: {len(self.fsr_points)}")
 
     def _import_fsr_record(self):
         from PyQt6.QtWidgets import QFileDialog
@@ -878,6 +892,8 @@ class CalibrationPage(QWidget):
             axF.set_xlim(min(t_force), max(t_force))
         elif t_fsr:
             axF.set_xlim(min(t_fsr), max(t_fsr))
+        # Garante limite de força 0..10 N
+        axF.set_ylim(0, 10)
         # Estilo de tema igual aos demais
         theme = self._get_theme()
         dark = (theme == 'Dark')
@@ -885,13 +901,17 @@ class CalibrationPage(QWidget):
         fg = '#ffffff' if dark else '#1e1e1e'
         grid = '#2d3640' if dark else '#d5dbe2'
         spine = '#4a525c' if dark else '#b7c2cc'
+        # Face do figure para remover bordas brancas
+        self.fsr_overlay_fig.patch.set_facecolor(bg)
         for ax in (axF, axV):
             ax.set_facecolor(bg)
-            ax.tick_params(colors=fg if dark else '#1e1e1e')
+            # Mantém ticks como no plot superior
+            ax.tick_params(colors=('#d0d4d8' if dark else '#1e1e1e'))
             for s in ax.spines.values(): s.set_color(spine)
         axF.title.set_color(fg); axF.xaxis.label.set_color(fg); axF.yaxis.label.set_color(fg)
         axV.yaxis.label.set_color(fg)
         axF.grid(color=grid, linestyle='--', linewidth=0.6, alpha=0.6)
+        axV.grid(color=grid, linestyle='--', linewidth=0.6, alpha=0.2)
         # Legenda no rodapé, uma linha
         self.fsr_overlay_fig.legends.clear()
         if handles:
