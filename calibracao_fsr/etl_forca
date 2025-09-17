@@ -1,0 +1,70 @@
+# -*- coding: utf-8 -*-
+# Limpeza, tratamento, salvamento e plots (bruto x tratado)
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from pathlib import Path
+
+# === CONFIG ===
+SRC = Path("Specimen_DadosEmBruto_1.csv")     # caminho do arquivo bruto
+DST = Path("forca_dataset_tratado.csv")        # saída tratada
+
+# --- helpers ---
+def to_float_br(x: str) -> float:
+    """Converte string com vírgula decimal para float (ignora aspas e espaços)."""
+    if pd.isna(x):
+        return np.nan
+    if isinstance(x, str):
+        x = x.replace('"', '').replace(',', '.').strip()
+    try:
+        return float(x)
+    except:
+        return np.nan
+
+def trunc(x: np.ndarray, n: int) -> np.ndarray:
+    """Trunca (não arredonda) para n casas decimais."""
+    fator = 10 ** n
+    return np.trunc(x * fator) / fator
+
+# === 1) Ler BRUTO (para plot e para derivar o tratado) ===
+# Remover 16 primeiras linhas (metadados). Após isso, ainda há uma linha de unidades.
+bruto = pd.read_csv(
+    SRC, encoding="latin1", sep=";", decimal=",",
+    skiprows=16, dtype=str  # ler como string para limpar manualmente
+)
+
+# Manter apenas 1ª e última colunas
+bruto = bruto.iloc[:, [0, -1]].copy()
+bruto.columns = ["Tempo", "Carga compressiva"]
+
+# Converter p/ número e remover a linha de unidades / inválidos
+bruto["Tempo"] = bruto["Tempo"].apply(to_float_br)
+bruto["Carga compressiva"] = bruto["Carga compressiva"].apply(to_float_br)
+bruto = bruto.dropna(subset=["Tempo", "Carga compressiva"]).reset_index(drop=True)
+
+# === 2) Criar TRATADO (sem truncar força aqui) ===
+tratado = bruto.copy()
+
+# Arredondar Tempo para 1 casa (pode criar tempos repetidos)
+tratado["Tempo"] = tratado["Tempo"].round(1)
+
+# Agregar por tempo repetido tirando a MÉDIA da força (SEM truncar aqui)
+tratado = (tratado
+           .groupby("Tempo", as_index=False, sort=True)["Carga compressiva"]
+           .mean())
+
+# === 3) Só AGORA truncar a força para 3 casas e salvar ===
+tratado_export = tratado.copy()
+tratado_export["Carga compressiva"] = trunc(tratado_export["Carga compressiva"].to_numpy(), 3)
+
+# Como precisamos formatações diferentes por coluna (Tempo 1 casa, Força 3 casas),
+# formatamos como strings com vírgula decimal:
+out = pd.DataFrame({
+    "Tempo": tratado_export["Tempo"].map(lambda x: f"{x:.1f}".replace(".", ",")),
+    "Carga compressiva": tratado_export["Carga compressiva"].map(lambda x: f"{x:.3f}".replace(".", ","))
+})
+
+# Salvar com ; e latin1
+out.to_csv(DST, index=False, sep=";", encoding="latin1")
+

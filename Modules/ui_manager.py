@@ -32,6 +32,7 @@ from PyQt6.QtWidgets import (
     QTableView, QListWidget, QListWidgetItem, QMessageBox, QStackedWidget, QSlider
 )
 import json
+import csv
 
 
 # ------------------ Dataclasses ------------------
@@ -440,7 +441,13 @@ class CalibrationPage(QWidget):
         self.latest_readings = latest_readings
         self._get_theme = theme_accessor  # função que retorna tema atual 'Dark'/'Light'
         from Modules.plot_manager import PlotManager
-        outer = QVBoxLayout(self); outer.setSpacing(12)
+        # Wrapper com barra de rolagem para acomodar área extra do FSR
+        from PyQt6.QtWidgets import QScrollArea
+        top_layout = QVBoxLayout(self); top_layout.setSpacing(0); top_layout.setContentsMargins(0,0,0,0)
+        self.scroll = QScrollArea(); self.scroll.setWidgetResizable(True)
+        top_layout.addWidget(self.scroll, 1)
+        self._scroll_content = QWidget(); self.scroll.setWidget(self._scroll_content)
+        outer = QVBoxLayout(self._scroll_content); outer.setSpacing(12)
 
         # Header controles (toggle segmentado + combo)
         ctrl_bar = QHBoxLayout(); ctrl_bar.setSpacing(12)
@@ -464,7 +471,8 @@ class CalibrationPage(QWidget):
         # Container plot
         self.plot_frame = QFrame(); self.plot_frame.setObjectName('CalibPlotFrame')
         self.plot_frame.setMinimumHeight(380)
-        outer.addWidget(self.plot_frame, 1)
+        # Use altura mínima e não consumir todo o espaço, para que a barra de rolagem funcione
+        outer.addWidget(self.plot_frame)
 
         # Instancia PlotManager com os sensores relevantes (todos para reaproveitar legendas/cores)
         self.calib_plot = PlotManager(self.plot_frame, sensors={k: v for k,v in sensors.items() if not k.startswith('goniometro')}, displayed_sensors=set())
@@ -472,7 +480,7 @@ class CalibrationPage(QWidget):
         self.calib_plot.set_show_voltage(True)
         self.calib_plot.set_mode('flex')
 
-        # Botões calibração
+        # Botões calibração (Flex)
         btn_row = QHBoxLayout(); btn_row.setSpacing(12)
         self.btn_start = QPushButton("Iniciar Gravação")
         self.btn_stop = QPushButton("Parar")
@@ -496,16 +504,87 @@ class CalibrationPage(QWidget):
         btn_row.addWidget(self.lbl_samples)
         outer.addLayout(btn_row)
 
+        # ---- Controles específicos FSR ----
+        fsr_ctrl = QHBoxLayout(); fsr_ctrl.setSpacing(10)
+        self.btn_import_ref = QPushButton("Importar Referência")
+        self.btn_fsr_start = QPushButton("Iniciar gravação")
+        self.btn_fsr_stop = QPushButton("Parar")
+        self.btn_import_fsr = QPushButton("Importar gravação FSR")
+        for b in (self.btn_import_ref, self.btn_fsr_start, self.btn_fsr_stop, self.btn_import_fsr):
+            b.setProperty('class','action')
+        self.btn_fsr_stop.setEnabled(False)
+        fsr_ctrl.addWidget(self.btn_import_ref)
+        fsr_ctrl.addWidget(self.btn_fsr_start)
+        fsr_ctrl.addWidget(self.btn_fsr_stop)
+        fsr_ctrl.addWidget(self.btn_import_fsr)
+        # Contadores FSR (tempo/amostras) ao lado do importar gravação
+        self.lbl_fsr_time = QLabel("Tempo: 0.0s"); self.lbl_fsr_time.setMinimumWidth(100)
+        self.lbl_fsr_samples = QLabel("Amostras: 0"); self.lbl_fsr_samples.setMinimumWidth(120)
+        fsr_ctrl.addWidget(self.lbl_fsr_time)
+        fsr_ctrl.addWidget(self.lbl_fsr_samples)
+        # Pequenas labels com nomes dos arquivos importados
+        self.lbl_ref_name = QLabel("Ref: --"); self.lbl_ref_name.setMinimumWidth(160)
+        self.lbl_fsr_name = QLabel("FSR: --"); self.lbl_fsr_name.setMinimumWidth(160)
+        fsr_ctrl.addStretch(); fsr_ctrl.addWidget(self.lbl_ref_name); fsr_ctrl.addWidget(self.lbl_fsr_name)
+        outer.addLayout(fsr_ctrl)
+
+        # Plot único para sobreposição (força e tensão) – aparece em modo FSR
+        from matplotlib.figure import Figure
+        from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+        self.fsr_overlay_fig = Figure(figsize=(10,3.2), dpi=100)
+        self.fsr_overlay_fig.subplots_adjust(left=0.08, right=0.94, top=0.9, bottom=0.24)
+        self.fsr_ax_force = self.fsr_overlay_fig.add_subplot(1,1,1)
+        self.fsr_ax_force.set_title("Força/Tensão x Tempo")
+        self.fsr_ax_force.set_xlabel("Tempo (s)")
+        self.fsr_ax_force.set_ylabel("Força (N)")
+        self.fsr_ax_force.set_ylim(0, 10)
+        self.fsr_ax_tension = self.fsr_ax_force.twinx()
+        self.fsr_ax_tension.set_ylabel("Tensão (V)")
+        self.fsr_canvas = FigureCanvasQTAgg(self.fsr_overlay_fig)
+        from PyQt6.QtWidgets import QSizePolicy
+        self.fsr_canvas.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.fsr_canvas.setMinimumHeight(360)
+        outer.addWidget(self.fsr_canvas)
+
+        # Linha de ações alinhamento/calibração (FSR)
+        fsr_actions = QHBoxLayout(); fsr_actions.setSpacing(10)
+        self.btn_align = QPushButton("Alinhar")
+        self.btn_fsr_calibrate = QPushButton("Calibrar")
+        for b in (self.btn_align, self.btn_fsr_calibrate):
+            b.setProperty('class','action')
+        fsr_actions.addWidget(self.btn_align)
+        fsr_actions.addWidget(self.btn_fsr_calibrate)
+        fsr_actions.addStretch()
+        outer.addLayout(fsr_actions)
+
         # Estado
         self.recording = False
-        self.record_points: List[tuple] = []
+        self.record_points = []
         self.record_timer = QTimer(self); self.record_timer.timeout.connect(self._collect_point)
         self.record_start_time = None
+
+        # Estado FSR
+        self.fsr_recording = False
+        self.fsr_points = []  # (t, V)
+        self.fsr_rec_timer = QTimer(self); self.fsr_rec_timer.timeout.connect(self._fsr_collect)
+        self.fsr_rec_start_t = None
+        self.fsr_force_ref = ([], [])  # (t, N)
+        self.fsr_rec_loaded = ([], [])  # (t, V)
+        self._align_offset = 0.0
 
         self._populate_combo()
         self._apply_display_selection()
         # Aplicar tema atual
         self.apply_theme(self._get_theme())
+        # Conexões FSR
+        self.btn_import_ref.clicked.connect(self._import_ref)
+        self.btn_fsr_start.clicked.connect(self._fsr_start)
+        self.btn_fsr_stop.clicked.connect(self._fsr_stop)
+        self.btn_import_fsr.clicked.connect(self._import_fsr_record)
+        self.btn_align.clicked.connect(self._align_series)
+        self.btn_fsr_calibrate.clicked.connect(self._calibrate_fsr)
+        # Atualiza visibilidade inicial dos controles FSR
+        self._update_fsr_controls_visibility()
 
     def _populate_combo(self):
         self.combo_sensor.blockSignals(True)
@@ -533,6 +612,26 @@ class CalibrationPage(QWidget):
         self._populate_combo()
         self._apply_display_selection()
         self.apply_theme(self._get_theme())
+        # Alterna visibilidade dos controles FSR
+        self._update_fsr_controls_visibility()
+
+    def _update_fsr_controls_visibility(self):
+        is_fsr = not self.is_flex_mode()
+        self.fsr_canvas.setVisible(is_fsr)
+        self.btn_import_ref.setVisible(is_fsr)
+        self.btn_fsr_start.setVisible(is_fsr)
+        self.btn_fsr_stop.setVisible(is_fsr)
+        self.btn_import_fsr.setVisible(is_fsr)
+        self.lbl_ref_name.setVisible(is_fsr)
+        self.lbl_fsr_name.setVisible(is_fsr)
+        self.btn_align.setVisible(is_fsr)
+        self.btn_fsr_calibrate.setVisible(is_fsr)
+        # Esconde os botões e contadores de Flex quando em FSR (evita duplicidade)
+        self.btn_start.setVisible(not is_fsr)
+        self.btn_stop.setVisible(not is_fsr)
+        self.btn_save.setVisible(not is_fsr)
+        self.lbl_time.setVisible(not is_fsr)
+        self.lbl_samples.setVisible(not is_fsr)
 
     def is_flex_mode(self):
         return self.mode_toggle_flex.isChecked()
@@ -636,6 +735,239 @@ class CalibrationPage(QWidget):
             else:
                 b.setStyleSheet('')
         self.update()
+
+    # --------------- FSR Workflow ---------------
+    def _import_ref(self):
+        from PyQt6.QtWidgets import QFileDialog
+        from Modules.fsr_calibrador import FSRCalibrador
+        path, _ = QFileDialog.getOpenFileName(self, "Selecionar referência de força", os.getcwd(), "CSV (*.csv)")
+        if not path:
+            return
+        try:
+            cal = FSRCalibrador()
+            t, f, out_path = cal.tratar_referencia(path)
+            self.fsr_force_ref = (t, f)
+            # Também gera/atualiza arquivo tratado atrelado ao sensor selecionado
+            sel = self.combo_sensor.currentText() or 'fsr'
+            out_dir = os.path.join('calibracao_fsr', 'forca_tratados')
+            os.makedirs(out_dir, exist_ok=True)
+            sensor_out = os.path.join(out_dir, f"forca_{sel}.csv")
+            with open(sensor_out, 'w', newline='', encoding='utf-8') as g:
+                w = csv.writer(g); w.writerow(['tempo','forca'])
+                for ti, fi in zip(t, f):
+                    w.writerow([f"{ti:.3f}", f"{fi:.6f}"])
+            self.lbl_ref_name.setText(f"Ref: {os.path.basename(sensor_out)}")
+            self._update_fsr_overlay_plot()
+        except Exception as e:
+            QMessageBox.warning(self, "Importação falhou", f"Erro ao importar referência: {e}")
+
+    def _fsr_start(self):
+        if self.is_flex_mode() or self.combo_sensor.count() == 0:
+            return
+        self.fsr_points.clear()
+        self.fsr_recording = True
+        self.fsr_rec_start_t = time.time()
+        self.btn_fsr_start.setEnabled(False)
+        self.btn_fsr_stop.setEnabled(True)
+        self.fsr_rec_timer.start(100)  # 0.1s
+
+    def _fsr_stop(self):
+        if not self.fsr_recording:
+            return
+        self.fsr_recording = False
+        self.fsr_rec_timer.stop()
+        self.btn_fsr_start.setEnabled(True)
+        self.btn_fsr_stop.setEnabled(False)
+        # Salvar CSV em gravacoes_fsr
+        try:
+            os.makedirs('gravacoes_fsr', exist_ok=True)
+            sel = self.combo_sensor.currentText() or 'fsr'
+            ts = int(time.time())
+            fname = f"gravacao_{sel}_{ts}.csv"
+            path = os.path.join('gravacoes_fsr', fname)
+            with open(path, 'w', newline='', encoding='utf-8') as f:
+                w = csv.writer(f)
+                w.writerow(['tempo','tensao'])
+                for t, v in self.fsr_points:
+                    w.writerow([f"{t:.3f}", f"{v:.6f}"])
+            self.lbl_fsr_name.setText(f"FSR: {fname}")
+            # também carrega como gravação carregada
+            # finaliza contadores
+            if self.fsr_rec_start_t:
+                elapsed = time.time() - self.fsr_rec_start_t
+                self.lbl_time.setText(f"Tempo: {elapsed:.1f}s")
+            self.lbl_samples.setText(f"Amostras: {len(self.fsr_points)}")
+            self.fsr_rec_loaded = ([t for t, _ in self.fsr_points], [v for _, v in self.fsr_points])
+            self._update_fsr_overlay_plot()
+        except Exception as e:
+            QMessageBox.warning(self, "Gravação", f"Erro ao salvar gravação: {e}")
+
+    def _fsr_collect(self):
+        if not self.fsr_recording:
+            return
+        sel = self.combo_sensor.currentText()
+        if not sel:
+            return
+        v = self.latest_readings.get(f"{sel}_voltage", 0.0)
+        t = time.time() - (self.fsr_rec_start_t or time.time())
+        # Arredonda tempo para 0.1s conforme requisito
+        tr = round(t, 1)
+        if self.fsr_points and abs(tr - self.fsr_points[-1][0]) < 1e-6:
+            # evita duplicar mesma marca de tempo arredondada
+            self.fsr_points[-1] = (tr, v)
+        else:
+            # v já está invertido na ingestão BLE (latest_readings)
+            self.fsr_points.append((tr, v))
+
+    def _import_fsr_record(self):
+        from PyQt6.QtWidgets import QFileDialog
+        path, _ = QFileDialog.getOpenFileName(self, "Selecionar gravação FSR", os.getcwd(), "CSV (*.csv)")
+        if not path:
+            return
+        try:
+            with open(path, 'r', newline='', encoding='utf-8') as f:
+                reader = csv.reader(f)
+                header = next(reader, None)
+                cols = [c.strip().lower() for c in (header or [])]
+                # Preferir 'tensao_eff'; aceitar 'tensao' como alternativa
+                if 'tempo' in cols:
+                    i_t = cols.index('tempo')
+                else:
+                    i_t = 0
+                if 'tensao_eff' in cols:
+                    i_v = cols.index('tensao_eff')
+                elif 'tensao' in cols:
+                    i_v = cols.index('tensao')
+                else:
+                    # fallback
+                    i_v = 1
+                t_list = []
+                v_list = []
+                for row in reader:
+                    if len(row) <= max(i_t, i_v):
+                        continue
+                    try:
+                        t_val = float(row[i_t]); v_val = float(row[i_v])
+                    except ValueError:
+                        continue
+                    t_list.append(t_val); v_list.append(v_val)
+            self.fsr_rec_loaded = (t_list, v_list)
+            self.lbl_fsr_name.setText(f"FSR: {os.path.basename(path)}")
+            self._update_fsr_overlay_plot()
+        except Exception as e:
+            QMessageBox.warning(self, "Importação", f"Falha ao importar gravação FSR: {e}")
+
+    def _update_fsr_overlay_plot(self):
+        # Limpa e plota as séries disponíveis
+        axF = self.fsr_ax_force; axV = self.fsr_ax_tension
+        axF.cla(); axV.cla()
+        axF.set_title("Força/Tensão x Tempo")
+        axF.set_xlabel("Tempo (s)")
+        axF.set_ylabel("Força (N)"); axV.set_ylabel("Tensão (V)")
+        t_force, f = self.fsr_force_ref
+        t_fsr, v = self.fsr_rec_loaded
+        handles = []; labels = []
+        if t_force and f:
+            hF = axF.plot(t_force, f, color='#26c6da', label='Força (N)')[0]
+            handles.append(hF); labels.append('Força (N)')
+        if t_fsr and v:
+            hV = axV.plot(t_fsr, v, color='#ff9800', label='Tensão (V)')[0]
+            handles.append(hV); labels.append('Tensão (V)')
+        # Ajusta limites básicos
+        if t_force:
+            axF.set_xlim(min(t_force), max(t_force))
+        elif t_fsr:
+            axF.set_xlim(min(t_fsr), max(t_fsr))
+        # Estilo de tema igual aos demais
+        theme = self._get_theme()
+        dark = (theme == 'Dark')
+        bg = '#1A1F27' if dark else '#ffffff'
+        fg = '#ffffff' if dark else '#1e1e1e'
+        grid = '#2d3640' if dark else '#d5dbe2'
+        spine = '#4a525c' if dark else '#b7c2cc'
+        for ax in (axF, axV):
+            ax.set_facecolor(bg)
+            ax.tick_params(colors=fg if dark else '#1e1e1e')
+            for s in ax.spines.values(): s.set_color(spine)
+        axF.title.set_color(fg); axF.xaxis.label.set_color(fg); axF.yaxis.label.set_color(fg)
+        axV.yaxis.label.set_color(fg)
+        axF.grid(color=grid, linestyle='--', linewidth=0.6, alpha=0.6)
+        # Legenda no rodapé, uma linha
+        self.fsr_overlay_fig.legends.clear()
+        if handles:
+            leg = self.fsr_overlay_fig.legend(
+                handles, labels,
+                loc='lower center', bbox_to_anchor=(0.5, 0.04), ncol=len(handles),
+                fontsize=9, framealpha=0.85, borderaxespad=0.6, columnspacing=1.0, handlelength=2.0
+            )
+            if dark:
+                leg.get_frame().set_facecolor('#1A1F27')
+                leg.get_frame().set_edgecolor('#3a424c')
+                for txt in leg.get_texts(): txt.set_color('#ffffff')
+            else:
+                leg.get_frame().set_facecolor('#ffffff')
+                leg.get_frame().set_edgecolor('#b7c2cc')
+                for txt in leg.get_texts(): txt.set_color('#1e1e1e')
+        self.fsr_canvas.draw()
+
+    def _align_series(self):
+        # Alinha pico de força com pico de tensão
+        t_force, f = self.fsr_force_ref
+        t_fsr, v = self.fsr_rec_loaded
+        if not (t_force and f and t_fsr and v):
+            return
+        import numpy as np
+        iF = int(np.argmax(f)); iV = int(np.argmax(v))
+        tF_peak = t_force[iF]; tV_peak = t_fsr[iV]
+        self._align_offset = tF_peak - tV_peak
+        # Aplica deslocamento na série FSR (tensão)
+        t_shifted = [t + self._align_offset for t in t_fsr]
+        self.fsr_rec_loaded = (t_shifted, v)
+        self._update_fsr_overlay_plot()
+
+    def _calibrate_fsr(self):
+        # Gera CSV combinado alinhado e aplica calibração no sensor selecionado
+        if self.is_flex_mode() or self.combo_sensor.count() == 0:
+            return
+        sel = self.combo_sensor.currentText()
+        t_force, f = self.fsr_force_ref
+        t_fsr, v = self.fsr_rec_loaded
+        if not (t_force and f and t_fsr and v):
+            QMessageBox.information(self, "Calibração", "Importe referência e gravação FSR, e alinhe antes de calibrar.")
+            return
+        import numpy as np
+        # Interpola força nos tempos do FSR, usando apenas faixa sobreposta
+        t_min = max(min(t_force), min(t_fsr))
+        t_max = min(max(t_force), max(t_fsr))
+        mask = [t_min <= t <= t_max for t in t_fsr]
+        if not any(mask):
+            QMessageBox.warning(self, "Calibração", "Faixa temporal não sobreposta após alinhamento.")
+            return
+        t_sel = np.array([t for t, m in zip(t_fsr, mask) if m])
+        v_sel = np.array([vv for vv, m in zip(v, mask) if m])
+        f_interp = np.interp(t_sel, t_force, f)
+        # Salva CSV combinado
+        out_dir = os.path.join('calibracao_fsr', 'calibra_fsr')
+        os.makedirs(out_dir, exist_ok=True)
+        out_path = os.path.join(out_dir, f"calibra_{sel}.csv")
+        try:
+            with open(out_path, 'w', newline='', encoding='utf-8') as g:
+                w = csv.writer(g)
+                w.writerow(['tempo','tensao','forca'])
+                for t_i, vv, ff in zip(t_sel, v_sel, f_interp):
+                    w.writerow([f"{t_i:.3f}", f"{vv:.6f}", f"{ff:.6f}"])
+        except Exception as e:
+            QMessageBox.warning(self, "Exportação", f"Falha ao salvar calibração: {e}")
+            return
+        # Aplica calibração no backend (voltage->force) usando pares (tensão, força)
+        try:
+            if sel in self.sensor_backend:
+                pairs = list(zip(v_sel.tolist(), f_interp.tolist()))
+                self.sensor_backend[sel].calibrate_with_data_points(pairs)
+        except Exception as e:
+            QMessageBox.warning(self, "Calibração", f"Falha ao aplicar calibração: {e}")
+            return
+        QMessageBox.information(self, "Calibração", f"Calibração salva em {out_path} e aplicada.")
 
 class TestsPage(QWidget):
     def __init__(self):
@@ -1125,30 +1457,52 @@ class MainWindow(QMainWindow):
         Ex: calibration_flex6.csv
         """
         base_dir = os.path.join(os.getcwd(), 'calibrations', 'flex')
-        if not os.path.isdir(base_dir):
-            return
         loaded = 0
+        if os.path.isdir(base_dir):
+            try:
+                for fname in os.listdir(base_dir):
+                    if not fname.startswith('calibration_') or not fname.endswith('.csv'):
+                        continue
+                    sensor_name = fname[len('calibration_'):-4]  # remove prefixo e .csv
+                    if sensor_name not in self.sensor_backend:
+                        continue
+                    path = os.path.join(base_dir, fname)
+                    try:
+                        ok = self.sensor_backend[sensor_name].load_calibration_from_file(path)
+                        if ok:
+                            loaded += 1
+                    except Exception as e:
+                        if hasattr(self, 'page_dev'):
+                            self.page_dev.add_line(f"Falha carregar calib {sensor_name}: {e}")
+                if loaded and hasattr(self, 'page_dev'):
+                    self.page_dev.add_line(f"{loaded} calibrações aplicadas no startup.")
+            except Exception as e:
+                if hasattr(self, 'page_dev'):
+                    self.page_dev.add_line(f"Erro ao varrer calibrações: {e}")
+        # Carrega também calibrações FSR (CSV combinado com tensao,forca)
         try:
-            for fname in os.listdir(base_dir):
-                if not fname.startswith('calibration_') or not fname.endswith('.csv'):
-                    continue
-                sensor_name = fname[len('calibration_'):-4]  # remove prefixo e .csv
-                # Ignora arquivos de fsr por enquanto (future: calibrar força)
-                if sensor_name not in self.sensor_backend:
-                    continue
-                path = os.path.join(base_dir, fname)
-                try:
-                    ok = self.sensor_backend[sensor_name].load_calibration_from_file(path)
-                    if ok:
-                        loaded += 1
-                except Exception as e:
-                    if hasattr(self, 'page_dev'):
-                        self.page_dev.add_line(f"Falha carregar calib {sensor_name}: {e}")
-            if loaded and hasattr(self, 'page_dev'):
-                self.page_dev.add_line(f"{loaded} calibrações aplicadas no startup.")
+            fsr_dir = os.path.join(os.getcwd(), 'calibracao_fsr', 'calibra_fsr')
+            if os.path.isdir(fsr_dir):
+                count = 0
+                for fname in os.listdir(fsr_dir):
+                    if not fname.lower().endswith('.csv'):
+                        continue
+                    base = os.path.splitext(fname)[0]
+                    # espera padrão calibra_<sensor>.csv
+                    sensor_name = base.replace('calibra_', '')
+                    if sensor_name in self.sensor_backend:
+                        try:
+                            ok = self.sensor_backend[sensor_name].load_fsr_calibration_from_file(os.path.join(fsr_dir, fname))
+                            if ok:
+                                count += 1
+                        except Exception as e:
+                            if hasattr(self, 'page_dev'):
+                                self.page_dev.add_line(f"Falha carregar calib FSR {sensor_name}: {e}")
+                if count and hasattr(self, 'page_dev'):
+                    self.page_dev.add_line(f"{count} calibrações FSR aplicadas no startup.")
         except Exception as e:
             if hasattr(self, 'page_dev'):
-                self.page_dev.add_line(f"Erro ao varrer calibrações: {e}")
+                self.page_dev.add_line(f"Erro ao varrer calibrações FSR: {e}")
 
     def apply_stylesheet(self):
         # Define paletas
@@ -1467,6 +1821,12 @@ class MainWindow(QMainWindow):
                     elif sid == 'flex8':
                         sid = 'flex3'
                     if sid in self.sensor_backend:
+                        # Inverter FSR: 0N ~ 3.3V, máximo ~ 0V -> tensão efetiva
+                        if sid.startswith('fsr'):
+                            try:
+                                voltage = 3.3 - voltage
+                            except Exception:
+                                pass
                         filt_v = self.sensor_backend[sid].apply_filter(voltage)
                         self.latest_readings[f"{sid}_voltage"] = filt_v
                         if sid.startswith('flex'):
