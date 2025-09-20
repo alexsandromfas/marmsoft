@@ -87,7 +87,25 @@ Melhorias para fazer no protoripo:
 
 
 
--Mostrar visualmente (ex: badge) quando um sensor já tem calibração carregada.
+- Mostrar visualmente (ex: badge) quando um sensor já tem calibração carregada.
 - Adicionar botão “Limpar Calibração”.
 - Dashboard mostrando conectado sempre para Bluetooth.
+
+- criar opção de controlar jogo com vários dedos e tirar a média.
+- controlar a posição dos troncos do flybird
+- opção de níveis de dificuldade.
+
+- criar sistema que grava o dado já calibrado em força do fsr. pra poder comparar com os dados da instron.
+
+
+- colocar medidor de tensão e força embaixo dos gráficos.
+tabela 
+
+tensão no fsr grande x força na instron
+
+2volts     x   0,45N
+2,5 V      x   0,55N
+3volts     x 1,24N
+3,25       x  2,70
+3,3        x  4,3N
 
