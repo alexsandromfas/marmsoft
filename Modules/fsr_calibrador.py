@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import os
 import csv
-from typing import Tuple, List, Dict
+from typing import Tuple, List, Dict, Optional
+
+import numpy as np
 
 
 class FSRCalibrador:
@@ -103,4 +105,73 @@ class FSRCalibrador:
                 w.writerow([f"{t:.3f}", f"{fv:.6f}"])
 
         return times, forces, out_path
+
+    def carregar_calibracao_csv(self, csv_filename: str) -> Optional[np.poly1d]:
+        """Lê um CSV combinado com colunas 'tensao' e 'forca' (ou 'voltage'/'force') e
+        retorna uma função polinomial de calibração (grau 2) mapeando tensão -> força.
+
+        Compatível com o comportamento atual usado em SensorData.load_fsr_calibration_from_file.
+        """
+        import csv
+        if not os.path.exists(csv_filename):
+            return None
+        with open(csv_filename, 'r', newline='', encoding='utf-8') as f:
+            reader = csv.reader(f)
+            header = next(reader, None)
+            if not header:
+                return None
+            cols = [h.strip().lower() for h in header]
+            try:
+                i_tensao = cols.index('tensao')
+                i_forca = cols.index('forca')
+            except ValueError:
+                try:
+                    i_tensao = cols.index('voltage')
+                    i_forca = cols.index('force')
+                except ValueError:
+                    return None
+            pares: List[Tuple[float, float]] = []
+            for row in reader:
+                if len(row) <= max(i_tensao, i_forca):
+                    continue
+                try:
+                    v = float(row[i_tensao]); f = float(row[i_forca])
+                except ValueError:
+                    continue
+                pares.append((v, f))
+        if not pares:
+            return None
+        # ajuste polinomial de 2º grau como no código original
+        voltages, values = zip(*pares)
+        return np.poly1d(np.polyfit(voltages, values, deg=2))
+
+    # --------------------- Alinhamento e Persistência (CSV) ---------------------
+    def alinhar_pelo_pico(self, t_forca: List[float], f: List[float], t_tensao: List[float], v: List[float]) -> Tuple[List[float], List[float], float]:
+        """Alinha séries pelo pico: retorna (t_tensao_alinhado, v, offset)."""
+        import numpy as _np
+        if not (t_forca and f and t_tensao and v):
+            return t_tensao, v, 0.0
+        iF = int(_np.argmax(f)); iV = int(_np.argmax(v))
+        tF_peak = t_forca[iF]; tV_peak = t_tensao[iV]
+        offset = tF_peak - tV_peak
+        t_shifted = [t + offset for t in t_tensao]
+        return t_shifted, v, offset
+
+    def exportar_calibracao_combinada(self, out_path: str, t_sel: List[float], v_sel: List[float], f_interp: List[float]) -> None:
+        import csv, os
+        os.makedirs(os.path.dirname(out_path) or '.', exist_ok=True)
+        with open(out_path, 'w', newline='', encoding='utf-8') as g:
+            w = csv.writer(g)
+            w.writerow(['tempo','tensao','forca'])
+            for t_i, vv, ff in zip(t_sel, v_sel, f_interp):
+                w.writerow([f"{t_i:.3f}", f"{vv:.6f}", f"{ff:.6f}"])
+
+    def append_coeficientes_csv(self, caminho_csv: str, poly: np.poly1d) -> None:
+        import csv
+        coefs = getattr(poly, 'c', None)
+        if coefs is None or len(coefs) == 0:
+            return
+        with open(caminho_csv, 'a', newline='') as f:
+            w = csv.writer(f)
+            w.writerow(['#COEFFICIENTS', *[f"{c:.16g}" for c in coefs]])
 

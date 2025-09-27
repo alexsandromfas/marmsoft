@@ -1,7 +1,14 @@
 # Bibliotecas principais utilizadas no projeto
 customtkinter
 pygame
-bleak
-numpy
-matplotlib
-PyQt6
+bleak>=0.22
+numpy>=1.26
+matplotlib>=3.8
+PyQt6>=6.5
+# SciPy é necessário para o ajuste racional do FSR; não há wheels para Python 3.13 em todas as plataformas ainda
+# Use Python 3.12 para instalar esta versão do SciPy com wheels pré-compilados
+scipy>=1.13; python_version<'3.13'
+
+# Utilitários usados no projeto
+requests
+PyYAML

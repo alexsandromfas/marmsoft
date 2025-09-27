@@ -280,6 +280,12 @@ class SensorsPage(QWidget):
             c.setChecked(False if sid == 'flex8' else True)
             c.setProperty('class','pretty'); sel_row.addWidget(c); self.old_checks[sid]=c
         sel_row.addStretch(); old_lay.addWidget(sel_wrap)
+        # Barra horizontal com valores atuais por sensor (dinâmica)
+        self.live_values_bar = QFrame(); self.live_values_bar.setObjectName('LiveValuesBar')
+        self.live_values_bar.setStyleSheet('#LiveValuesBar { border-top: 1px solid rgba(255,255,255,40); padding: 6px 8px; }')
+        self.live_values_layout = QHBoxLayout(self.live_values_bar); self.live_values_layout.setContentsMargins(4,4,4,4); self.live_values_layout.setSpacing(12)
+        self.live_value_labels: Dict[str, QLabel] = {}
+        old_lay.addWidget(self.live_values_bar)
         # Renomeado: old_plot -> unified_plot
         self.unified_plot = PlotManager(
             self.old_plot_container,
@@ -292,6 +298,8 @@ class SensorsPage(QWidget):
         def _old_update_checks():
             displayed = {k for k, cb in self.old_checks.items() if cb.isChecked()}
             self.unified_plot.update_displayed_sensors(displayed)
+            # Atualiza visibilidade da lista de valores ao mudar seleção
+            self._update_live_values_visible(displayed)
         for cb in self.old_checks.values():
             cb.stateChanged.connect(_old_update_checks)
         self.mode_stack.addWidget(page_old)
@@ -300,6 +308,8 @@ class SensorsPage(QWidget):
         # Exibe imediatamente os toggles Flex/FSR e opções quando iniciamos em modo unificado
         self.segmented_old_mode.setVisible(True)
         self.old_mode_opts.setVisible(True)
+        # Inicializa lista conforme seleção atual
+        _old_update_checks()
 
     def _old_toggle_legend(self):
         if hasattr(self, 'unified_plot'):
@@ -323,6 +333,12 @@ class SensorsPage(QWidget):
                 self.btn_old_flex.setProperty('selected','false'); self.btn_old_fsr.setProperty('selected','true')
             for b in (self.btn_old_flex, self.btn_old_fsr):
                 b.style().unpolish(b); b.style().polish(b); b.update()
+        # Refiltra a barra de valores conforme o modo
+        try:
+            displayed = {k for k, cb in self.old_checks.items() if cb.isChecked()}
+            self._update_live_values_visible(displayed)
+        except Exception:
+            pass
 
     def _old_mode_segment_clicked(self):
         sender = self.sender()
@@ -379,7 +395,60 @@ class SensorsPage(QWidget):
                 mode_txt = getattr(self, '_old_mode_cached', 'flex')
                 self.unified_plot.set_mode(mode_txt)
                 self.unified_plot.update(current_time, latest_readings)
+                # Atualiza textos da barra de valores ao vivo
+                self._refresh_live_values(latest_readings)
             except RuntimeError:
+                pass
+
+    # --------- Helpers lista de valores ao vivo ---------
+    def _update_live_values_visible(self, displayed: set):
+        # Mostra apenas sensores do modo atual
+        mode_txt = getattr(self, '_old_mode_cached', 'flex')
+        if mode_txt == 'flex':
+            wanted = {name for name in displayed if name.startswith('flex')}
+            # inclui goniômetro se estiver selecionado
+            if 'goniometer' in displayed:
+                wanted.add('goniometer')
+        else:
+            wanted = {name for name in displayed if name.startswith('fsr')}
+        # Remover labels que não são mais desejados
+        for name in list(self.live_value_labels.keys()):
+            if name not in wanted:
+                lab = self.live_value_labels.pop(name)
+                self.live_values_layout.removeWidget(lab)
+                lab.deleteLater()
+        # Adicionar labels faltantes
+        for name in sorted(wanted):
+            if name not in self.live_value_labels:
+                lab = QLabel(name)
+                ft = lab.font(); ft.setPointSize(10); lab.setFont(ft)
+                lab.setStyleSheet('color: #cccccc;')
+                self.live_values_layout.addWidget(lab)
+                self.live_value_labels[name] = lab
+
+    def _refresh_live_values(self, latest_readings: dict):
+        # Atualiza o texto com os valores mais recentes
+        mode_txt = getattr(self, '_old_mode_cached', 'flex')
+        for name, lab in self.live_value_labels.items():
+            try:
+                if name == 'goniometer' and mode_txt == 'flex':
+                    ang = float(latest_readings.get('goniometer_angle', 0.0))
+                    a_str = f"{ang:.0f}".replace('.', ',')
+                    lab.setText(f"goniometer {a_str}º")
+                elif name.startswith('flex') and mode_txt == 'flex':
+                    v = float(latest_readings.get(f"{name}_voltage", 0.0))
+                    ang = float(latest_readings.get(f"{name}_angle", 0.0))
+                    v_str = f"{v:.2f}".replace('.', ',')
+                    a_str = f"{ang:.0f}".replace('.', ',')
+                    lab.setText(f"{name} {v_str}v {a_str}º")
+                elif name.startswith('fsr') and mode_txt == 'fsr':
+                    v = float(latest_readings.get(f"{name}_voltage", 0.0))
+                    force = float(latest_readings.get(f"{name}_force", 0.0))
+                    v_str = f"{v:.2f}".replace('.', ',')
+                    f_str = f"{force:.2f}".replace('.', ',')
+                    lab.setText(f"{name} {v_str}v {f_str}N")
+            except Exception:
+                # Evita travar UI por conversões
                 pass
 
 class MultiSensorPlot(QWidget):
@@ -502,6 +571,12 @@ class CalibrationPage(QWidget):
         btn_row.addStretch()
         btn_row.addWidget(self.lbl_time)
         btn_row.addWidget(self.lbl_samples)
+        # Barra de valores ao vivo (Flex) ao lado dos contadores
+        self.flex_live_values_bar = QFrame(); self.flex_live_values_bar.setObjectName('FlexLiveValuesBar')
+        self.flex_live_values_bar.setStyleSheet('#FlexLiveValuesBar { padding: 2px 4px; }')
+        self.flex_live_values_layout = QHBoxLayout(self.flex_live_values_bar); self.flex_live_values_layout.setContentsMargins(4,0,0,0); self.flex_live_values_layout.setSpacing(12)
+        self.flex_live_labels = {}
+        btn_row.addWidget(self.flex_live_values_bar)
         outer.addLayout(btn_row)
 
         # ---- Controles específicos FSR ----
@@ -522,6 +597,12 @@ class CalibrationPage(QWidget):
         self.lbl_fsr_samples = QLabel("Amostras: 0"); self.lbl_fsr_samples.setMinimumWidth(120)
         fsr_ctrl.addWidget(self.lbl_fsr_time)
         fsr_ctrl.addWidget(self.lbl_fsr_samples)
+        # Barra de valores ao vivo (FSR) ao lado dos contadores
+        self.fsr_live_values_bar = QFrame(); self.fsr_live_values_bar.setObjectName('FsrLiveValuesBar')
+        self.fsr_live_values_bar.setStyleSheet('#FsrLiveValuesBar { padding: 2px 4px; }')
+        self.fsr_live_values_layout = QHBoxLayout(self.fsr_live_values_bar); self.fsr_live_values_layout.setContentsMargins(4,0,0,0); self.fsr_live_values_layout.setSpacing(12)
+        self.fsr_live_labels = {}
+        fsr_ctrl.addWidget(self.fsr_live_values_bar)
         # Pequenas labels com nomes dos arquivos importados
         self.lbl_ref_name = QLabel("Ref: --"); self.lbl_ref_name.setMinimumWidth(160)
         self.lbl_fsr_name = QLabel("FSR: --"); self.lbl_fsr_name.setMinimumWidth(160)
@@ -557,6 +638,121 @@ class CalibrationPage(QWidget):
         fsr_actions.addStretch()
         outer.addLayout(fsr_actions)
 
+        # ---- FSR: Plot Calibração/Aferição + Verificação ----
+        self.fsr_eval_group = QFrame(); self.fsr_eval_group.setObjectName('FsrEvalGroup')
+        fsr_eval_outer = QVBoxLayout(self.fsr_eval_group); fsr_eval_outer.setContentsMargins(0,0,0,0); fsr_eval_outer.setSpacing(8)
+        # Toggle
+        self.fsr_plot_mode = 'calib'  # 'calib' | 'verif'
+        self.fsr_plot_toggle = QFrame(); self.fsr_plot_toggle.setObjectName('Segmented')
+        fsr_tlay = QHBoxLayout(self.fsr_plot_toggle); fsr_tlay.setContentsMargins(4,4,4,4); fsr_tlay.setSpacing(2)
+        self.btn_fsr_plot_calib = QPushButton('Plot Calibração'); self.btn_fsr_plot_verif = QPushButton('Plot Aferição')
+        for b in (self.btn_fsr_plot_calib, self.btn_fsr_plot_verif): b.setCheckable(True); b.clicked.connect(self._fsr_plot_toggle_clicked)
+        self.btn_fsr_plot_calib.setChecked(True); self.btn_fsr_plot_calib.setProperty('selected','true')
+        self.btn_fsr_plot_verif.setProperty('selected','false')
+        fsr_tlay.addWidget(self.btn_fsr_plot_calib); fsr_tlay.addWidget(self.btn_fsr_plot_verif)
+        from PyQt6.QtWidgets import QSizePolicy as _QSP
+        self.fsr_plot_toggle.setSizePolicy(_QSP.Policy.Maximum, _QSP.Policy.Fixed)
+        fsr_eval_outer.addWidget(self.fsr_plot_toggle)
+        # Figura
+        from matplotlib.figure import Figure as _Fig
+        from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as _Canvas
+        self.fsr_eval_fig = _Fig(figsize=(10,3.2), dpi=100)
+        self.fsr_eval_fig.subplots_adjust(left=0.08, right=0.96, top=0.9, bottom=0.18)
+        self.fsr_eval_ax = self.fsr_eval_fig.add_subplot(1,1,1)
+        self.fsr_eval_canvas = _Canvas(self.fsr_eval_fig)
+        self.fsr_eval_canvas.setSizePolicy(_QSP.Policy.Expanding, _QSP.Policy.Fixed)
+        self.fsr_eval_canvas.setMinimumHeight(420)
+        fsr_eval_outer.addWidget(self.fsr_eval_canvas)
+        # Controles verificação FSR
+        self.fsr_verif_frame = QFrame(); fsr_verif_row = QHBoxLayout(self.fsr_verif_frame); fsr_verif_row.setSpacing(10)
+        self.btn_fsr_verif_start = QPushButton('Iniciar aferição FSR')
+        self.btn_fsr_verif_stop = QPushButton('Parar aferição'); self.btn_fsr_verif_stop.setEnabled(False)
+        self.btn_fsr_verif_plot = QPushButton('Plotar e calcular métricas')
+        self.btn_fsr_verif_open_ref = QPushButton('Importar ref Instron')
+        self.btn_fsr_verif_align = QPushButton('Alinhar (pico)')
+        for b in (self.btn_fsr_verif_start, self.btn_fsr_verif_stop, self.btn_fsr_verif_plot, self.btn_fsr_verif_open_ref, self.btn_fsr_verif_align): b.setProperty('class','action')
+        fsr_verif_row.addWidget(self.btn_fsr_verif_start); fsr_verif_row.addWidget(self.btn_fsr_verif_stop); fsr_verif_row.addWidget(self.btn_fsr_verif_plot); fsr_verif_row.addWidget(self.btn_fsr_verif_open_ref); fsr_verif_row.addWidget(self.btn_fsr_verif_align)
+        fsr_verif_row.addStretch()
+        self.lbl_fsr_verif_metrics = QLabel('MAE: -- | RMSE: -- | Corr: --')
+        self.lbl_fsr_verif_time = QLabel('Tempo: 0.0s'); self.lbl_fsr_verif_samples = QLabel('Amostras: 0')
+        self.lbl_fsr_verif_file = QLabel('Arq: --'); self.lbl_fsr_verif_file.setMinimumWidth(220)
+        fsr_verif_row.addWidget(self.lbl_fsr_verif_metrics); fsr_verif_row.addWidget(self.lbl_fsr_verif_time); fsr_verif_row.addWidget(self.lbl_fsr_verif_samples); fsr_verif_row.addWidget(self.lbl_fsr_verif_file)
+        fsr_eval_outer.addWidget(self.fsr_verif_frame)
+        outer.addWidget(self.fsr_eval_group)
+        # Estado verificação FSR
+        self.fsr_verif_recording = False
+        self.fsr_verif_points = []  # (t, forca_fsr)
+        self.fsr_verif_start_t = None
+        self.fsr_verif_timer = QTimer(self); self.fsr_verif_timer.timeout.connect(self._fsr_verif_collect)
+        # Referência Instron para verificação (limpa via ETL do calibrador)
+        self.fsr_verif_force_ref = ([], [])  # (t, N)
+        # Alinhamento para verificação
+        self._fsr_verif_align_offset = 0.0
+        # Conexões verificação FSR
+        self.btn_fsr_verif_start.clicked.connect(self._fsr_verif_start)
+        self.btn_fsr_verif_stop.clicked.connect(self._fsr_verif_stop)
+        self.btn_fsr_verif_plot.clicked.connect(self._fsr_verif_plot_metrics)
+        self.btn_fsr_verif_open_ref.clicked.connect(self._fsr_verif_import_ref)
+        self.btn_fsr_verif_align.clicked.connect(self._fsr_verif_align)
+
+        # ---- Flex: Plot Calibração/Aferição + Controles ----
+        # Grupo visível somente em modo Flex
+        from matplotlib.figure import Figure
+        from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+        self.flex_group = QFrame(); self.flex_group.setObjectName('FlexCalibGroup')
+        flex_outer = QVBoxLayout(self.flex_group); flex_outer.setContentsMargins(0,0,0,0); flex_outer.setSpacing(8)
+        # Toggle de modo de plot
+        self.flex_plot_mode = 'calib'  # 'calib' | 'verif'
+        self.flex_plot_toggle = QFrame(); self.flex_plot_toggle.setObjectName('Segmented')
+        tlay = QHBoxLayout(self.flex_plot_toggle); tlay.setContentsMargins(4,4,4,4); tlay.setSpacing(2)
+        self.btn_plot_calib = QPushButton('Plot Calibração'); self.btn_plot_verif = QPushButton('Plot Aferição')
+        for b in (self.btn_plot_calib, self.btn_plot_verif):
+            b.setCheckable(True); b.clicked.connect(self._flex_plot_toggle_clicked)
+        self.btn_plot_calib.setChecked(True); self.btn_plot_calib.setProperty('selected','true')
+        self.btn_plot_verif.setProperty('selected','false')
+        tlay.addWidget(self.btn_plot_calib); tlay.addWidget(self.btn_plot_verif)
+        # Mantém o toggle compacto (similar ao de Flex/FSR no topo)
+        from PyQt6.QtWidgets import QSizePolicy
+        self.flex_plot_toggle.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        flex_outer.addWidget(self.flex_plot_toggle)
+        # Figura
+        self.flex_fig = Figure(figsize=(10,3.2), dpi=100)
+        self.flex_fig.subplots_adjust(left=0.08, right=0.96, top=0.9, bottom=0.18)
+        self.flex_ax = self.flex_fig.add_subplot(1,1,1)
+        self.flex_canvas = FigureCanvasQTAgg(self.flex_fig)
+        self.flex_canvas.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.flex_canvas.setMinimumHeight(420)
+        flex_outer.addWidget(self.flex_canvas)
+        # Controles de aferição
+        self.flex_verif_frame = QFrame()
+        verif_row = QHBoxLayout(self.flex_verif_frame); verif_row.setSpacing(10)
+        self.btn_verif_start = QPushButton("Iniciar aferição")
+        self.btn_verif_stop = QPushButton("Parar aferição"); self.btn_verif_stop.setEnabled(False)
+        self.btn_verif_plot = QPushButton("Plotar e calcular métricas")
+        self.btn_verif_open = QPushButton("Abrir arquivo")
+        for b in (self.btn_verif_start, self.btn_verif_stop, self.btn_verif_plot, self.btn_verif_open): b.setProperty('class','action')
+        verif_row.addWidget(self.btn_verif_start); verif_row.addWidget(self.btn_verif_stop); verif_row.addWidget(self.btn_verif_plot); verif_row.addWidget(self.btn_verif_open)
+        verif_row.addStretch()
+        self.lbl_verif_metrics = QLabel("MAE: -- | RMSE: -- | Corr: --")
+        self.lbl_verif_time = QLabel("Tempo: 0.0s"); self.lbl_verif_samples = QLabel("Amostras: 0")
+        self.lbl_verif_file = QLabel("Arq: --"); self.lbl_verif_file.setMinimumWidth(220)
+        verif_row.addWidget(self.lbl_verif_metrics)
+        verif_row.addWidget(self.lbl_verif_time); verif_row.addWidget(self.lbl_verif_samples); verif_row.addWidget(self.lbl_verif_file)
+        flex_outer.addWidget(self.flex_verif_frame)
+        outer.addWidget(self.flex_group)
+
+        # Estado aferição flex
+        self.verif_recording = False
+        self.verif_points = []  # (t, flex_angle, gonio_angle)
+        self.verif_start_time = None
+        self.verif_timer = QTimer(self); self.verif_timer.timeout.connect(self._collect_verif_point)
+
+        # Callbacks aferição flex
+        self.btn_verif_start.clicked.connect(self.start_verification)
+        self.btn_verif_stop.clicked.connect(self.stop_verification)
+        self.btn_verif_plot.clicked.connect(self.plot_verification)
+        self.btn_verif_open.clicked.connect(self.open_verification_file)
+
         # Estado
         self.recording = False
         self.record_points = []
@@ -585,6 +781,11 @@ class CalibrationPage(QWidget):
         self.btn_fsr_calibrate.clicked.connect(self._calibrate_fsr)
         # Atualiza visibilidade inicial dos controles FSR
         self._update_fsr_controls_visibility()
+        # Atualiza gráfico inicial de flex calibração
+        try:
+            self._draw_flex_calibration_plot()
+        except Exception:
+            pass
 
     def _populate_combo(self):
         self.combo_sensor.blockSignals(True)
@@ -625,16 +826,25 @@ class CalibrationPage(QWidget):
         # Contadores FSR só no modo FSR (evita duplicidade no Flex)
         self.lbl_fsr_time.setVisible(is_fsr)
         self.lbl_fsr_samples.setVisible(is_fsr)
+        self.fsr_live_values_bar.setVisible(is_fsr)
         self.lbl_ref_name.setVisible(is_fsr)
         self.lbl_fsr_name.setVisible(is_fsr)
         self.btn_align.setVisible(is_fsr)
         self.btn_fsr_calibrate.setVisible(is_fsr)
+        # Grupo de avaliação FSR visível somente no modo FSR
+        self.fsr_eval_group.setVisible(is_fsr)
         # Esconde os botões e contadores de Flex quando em FSR (evita duplicidade)
         self.btn_start.setVisible(not is_fsr)
         self.btn_stop.setVisible(not is_fsr)
         self.btn_save.setVisible(not is_fsr)
         self.lbl_time.setVisible(not is_fsr)
         self.lbl_samples.setVisible(not is_fsr)
+        self.flex_live_values_bar.setVisible(not is_fsr)
+        # Grupo do plot de flex visível apenas em Flex
+        self.flex_group.setVisible(not is_fsr)
+        # Em Flex, visibilidade dos controles de aferição depende do toggle
+        if not is_fsr:
+            self.flex_verif_frame.setVisible(self.flex_plot_mode == 'verif')
 
     def is_flex_mode(self):
         return self.mode_toggle_flex.isChecked()
@@ -648,6 +858,29 @@ class CalibrationPage(QWidget):
         else:
             displayed = {sel}
         self.calib_plot.update_displayed_sensors(displayed)
+        # Atualiza barra de valores visíveis conforme o sensor selecionado/mode
+        try:
+            self._update_calib_live_values_visible()
+        except Exception:
+            pass
+        # Atualiza gráfico de calibração se em modo flex
+        if self.is_flex_mode():
+            try:
+                if self.flex_plot_mode == 'calib':
+                    self._draw_flex_calibration_plot()
+                else:
+                    self._draw_flex_verification_plot()
+            except Exception:
+                pass
+        else:
+            # Atualiza gráfico de avaliação FSR
+            try:
+                if self.fsr_plot_mode == 'calib':
+                    self._draw_fsr_calibration_plot()
+                else:
+                    self._draw_fsr_verification_plot()
+            except Exception:
+                pass
 
     def start_record(self):
         if not self.is_flex_mode():
@@ -703,8 +936,72 @@ class CalibrationPage(QWidget):
             # Garante modo correto conforme toggle
             self.calib_plot.set_mode('flex' if self.is_flex_mode() else 'fsr')
             self.calib_plot.update(current_time, self.latest_readings)
+            # Atualiza valores ao vivo do(s) sensor(es) selecionado(s)
+            self._refresh_calib_live_values()
         except RuntimeError:
             pass
+
+    # ---------- Valores ao vivo na tela de Calibração ----------
+    def _update_calib_live_values_visible(self):
+        # Flex: sensor selecionado + goniômetro; FSR: sensor selecionado
+        sel = self.combo_sensor.currentText() if self.combo_sensor.count()>0 else ''
+        if self.is_flex_mode():
+            wanted = [sel, 'goniometer'] if sel else ['goniometer']
+            # remover extras
+            for name in list(self.flex_live_labels.keys()):
+                if name not in wanted:
+                    lab = self.flex_live_labels.pop(name)
+                    self.flex_live_values_layout.removeWidget(lab)
+                    lab.deleteLater()
+            # adicionar faltantes
+            for name in wanted:
+                if name and name not in self.flex_live_labels:
+                    lab = QLabel(name)
+                    ft = lab.font(); ft.setPointSize(10); lab.setFont(ft)
+                    lab.setStyleSheet('color: #cccccc;')
+                    self.flex_live_values_layout.addWidget(lab)
+                    self.flex_live_labels[name] = lab
+        else:
+            wanted = [sel] if sel else []
+            for name in list(self.fsr_live_labels.keys()):
+                if name not in wanted:
+                    lab = self.fsr_live_labels.pop(name)
+                    self.fsr_live_values_layout.removeWidget(lab)
+                    lab.deleteLater()
+            for name in wanted:
+                if name and name not in self.fsr_live_labels:
+                    lab = QLabel(name)
+                    ft = lab.font(); ft.setPointSize(10); lab.setFont(ft)
+                    lab.setStyleSheet('color: #cccccc;')
+                    self.fsr_live_values_layout.addWidget(lab)
+                    self.fsr_live_labels[name] = lab
+
+    def _refresh_calib_live_values(self):
+        if self.is_flex_mode():
+            for name, lab in self.flex_live_labels.items():
+                try:
+                    if name == 'goniometer':
+                        ang = float(self.latest_readings.get('goniometer_angle', 0.0))
+                        a_str = f"{ang:.0f}".replace('.', ',')
+                        lab.setText(f"goniometer {a_str}º")
+                    else:
+                        v = float(self.latest_readings.get(f"{name}_voltage", 0.0))
+                        ang = float(self.latest_readings.get(f"{name}_angle", 0.0))
+                        v_str = f"{v:.2f}".replace('.', ',')
+                        a_str = f"{ang:.0f}".replace('.', ',')
+                        lab.setText(f"{name} {v_str}v {a_str}º")
+                except Exception:
+                    pass
+        else:
+            for name, lab in self.fsr_live_labels.items():
+                try:
+                    v = float(self.latest_readings.get(f"{name}_voltage", 0.0))
+                    force = float(self.latest_readings.get(f"{name}_force", 0.0))
+                    v_str = f"{v:.2f}".replace('.', ',')
+                    f_str = f"{force:.2f}".replace('.', ',')
+                    lab.setText(f"{name} {v_str}v {f_str}N")
+                except Exception:
+                    pass
 
     def save_calibration(self):
         if not self.record_points:
@@ -712,19 +1009,37 @@ class CalibrationPage(QWidget):
         sel = self.combo_sensor.currentText()
         # Ordena por ângulo crescente antes de ajustar
         ordered = sorted(self.record_points, key=lambda x: x[1])
-        # Salva
-        import os, csv
+        # Salva via FlexCalibrador (delegando persistência)
+        import os
+        from Modules.flex_calibrador import FlexCalibrador
         os.makedirs('calibrations/flex', exist_ok=True)
         path = f"calibrations/flex/calibration_{sel}.csv"
-        with open(path, 'w', newline='') as f:
-            w = csv.writer(f)
-            w.writerow(['Voltage','Angle'])
-            w.writerows(ordered)
+        try:
+            FlexCalibrador().salvar_pontos_csv(path, ordered)
+        except Exception as _e:
+            # fallback para manter compatibilidade em caso de erro inesperado
+            import csv
+            with open(path, 'w', newline='') as f:
+                w = csv.writer(f)
+                w.writerow(['Voltage','Angle'])
+                w.writerows(ordered)
         # Aplica no backend
         if sel in self.sensor_backend:
             self.sensor_backend[sel].calibrate_with_data_points(ordered)
+            # Após ajustar no backend, persistir coeficientes no próprio CSV via FlexCalibrador
+            try:
+                func = getattr(self.sensor_backend[sel], 'calibration_function', None)
+                if func is not None:
+                    FlexCalibrador().append_coeficientes_csv(path, func)
+            except Exception:
+                pass
         self.btn_save.setEnabled(False)
         self.btn_start.setEnabled(True)
+        # Atualiza o plot de calibração com os novos pontos/coeficientes
+        try:
+            self._draw_flex_calibration_plot()
+        except Exception:
+            pass
 
     def apply_theme(self, theme: str):
         # Repassa para plot
@@ -735,6 +1050,21 @@ class CalibrationPage(QWidget):
             self._update_fsr_overlay_plot()
         except Exception:
             pass
+        # Aplica tema ao plot de flex calibração/aferição
+        try:
+            self._apply_theme_flex_plot(theme)
+        except Exception:
+            pass
+        # Aplica tema ao plot de avaliação FSR e redesenha o modo atual
+        try:
+            self._apply_theme_fsr_eval_plot(theme)
+            if not self.is_flex_mode():
+                if self.fsr_plot_mode == 'calib':
+                    self._draw_fsr_calibration_plot()
+                else:
+                    self._draw_fsr_verification_plot()
+        except Exception:
+            pass
         # Ajusta seleção
         fg_sel = '#ffffff' if theme=='Dark' else '#1e1e1e'
         for b in (self.mode_toggle_flex,self.mode_toggle_fsr):
@@ -743,6 +1073,494 @@ class CalibrationPage(QWidget):
             else:
                 b.setStyleSheet('')
         self.update()
+
+    # ---------- Flex calibração/aferição (UI e lógica) ----------
+    def _flex_plot_toggle_clicked(self):
+        sender = self.sender()
+        if sender == self.btn_plot_calib:
+            self.flex_plot_mode = 'calib'
+            self.btn_plot_calib.setChecked(True); self.btn_plot_verif.setChecked(False)
+            self.btn_plot_calib.setProperty('selected','true'); self.btn_plot_verif.setProperty('selected','false')
+        else:
+            self.flex_plot_mode = 'verif'
+            self.btn_plot_calib.setChecked(False); self.btn_plot_verif.setChecked(True)
+            self.btn_plot_calib.setProperty('selected','false'); self.btn_plot_verif.setProperty('selected','true')
+        for b in (self.btn_plot_calib, self.btn_plot_verif):
+            b.style().unpolish(b); b.style().polish(b); b.update()
+        # alterna visibilidade dos controles de aferição
+        self.flex_verif_frame.setVisible(self.flex_plot_mode == 'verif')
+        # redesenha
+        try:
+            if self.flex_plot_mode == 'calib':
+                self._draw_flex_calibration_plot()
+            else:
+                self._draw_flex_verification_plot()
+        except Exception:
+            pass
+
+    def _fsr_plot_toggle_clicked(self):
+        sender = self.sender()
+        if sender == self.btn_fsr_plot_calib:
+            self.fsr_plot_mode = 'calib'
+            self.btn_fsr_plot_calib.setChecked(True); self.btn_fsr_plot_verif.setChecked(False)
+            self.btn_fsr_plot_calib.setProperty('selected','true'); self.btn_fsr_plot_verif.setProperty('selected','false')
+        else:
+            self.fsr_plot_mode = 'verif'
+            self.btn_fsr_plot_calib.setChecked(False); self.btn_fsr_plot_verif.setChecked(True)
+            self.btn_fsr_plot_calib.setProperty('selected','false'); self.btn_fsr_plot_verif.setProperty('selected','true')
+        for b in (self.btn_fsr_plot_calib, self.btn_fsr_plot_verif):
+            b.style().unpolish(b); b.style().polish(b); b.update()
+        # alterna visibilidade do frame de verificação
+        self.fsr_verif_frame.setVisible(self.fsr_plot_mode == 'verif')
+        # redesenha
+        try:
+            if self.fsr_plot_mode == 'calib':
+                self._draw_fsr_calibration_plot()
+            else:
+                self._draw_fsr_verification_plot()
+        except Exception:
+            pass
+
+    def _apply_theme_flex_plot(self, theme: str):
+        dark = (theme == 'Dark')
+        bg = '#1A1F27' if dark else '#ffffff'
+        fg = '#ffffff' if dark else '#1e1e1e'
+        grid = '#2d3640' if dark else '#d5dbe2'
+        spine = '#4a525c' if dark else '#b7c2cc'
+        self.flex_fig.patch.set_facecolor(bg)
+        ax = self.flex_ax
+        ax.set_facecolor(bg)
+        ax.title.set_color(fg); ax.xaxis.label.set_color(fg); ax.yaxis.label.set_color(fg)
+        ax.tick_params(colors=('#d0d4d8' if dark else '#1e1e1e'))
+        for s in ax.spines.values(): s.set_color(spine)
+        ax.grid(color=grid, linestyle='--', linewidth=0.6, alpha=0.6)
+        self.flex_canvas.draw_idle()
+
+    def _apply_theme_fsr_eval_plot(self, theme: str):
+        dark = (theme == 'Dark')
+        bg = '#1A1F27' if dark else '#ffffff'
+        fg = '#ffffff' if dark else '#1e1e1e'
+        grid = '#2d3640' if dark else '#d5dbe2'
+        spine = '#4a525c' if dark else '#b7c2cc'
+        self.fsr_eval_fig.patch.set_facecolor(bg)
+        ax = self.fsr_eval_ax
+        ax.set_facecolor(bg)
+        ax.title.set_color(fg); ax.xaxis.label.set_color(fg); ax.yaxis.label.set_color(fg)
+        ax.tick_params(colors=('#d0d4d8' if dark else '#1e1e1e'))
+        for s in ax.spines.values(): s.set_color(spine)
+        ax.grid(color=grid, linestyle='--', linewidth=0.6, alpha=0.6)
+        self.fsr_eval_canvas.draw_idle()
+
+    def _read_flex_calibration_points(self, sensor: str):
+        import os, csv
+        path = os.path.join('calibrations','flex', f'calibration_{sensor}.csv')
+        xs, ys = [], []
+        if not os.path.isfile(path):
+            return xs, ys
+        with open(path, 'r', newline='') as f:
+            rd = csv.reader(f)
+            header = next(rd, None)
+            if not header:
+                return xs, ys
+            for row in rd:
+                if not row or row[0].startswith('#'):
+                    continue
+                if len(row) < 2:
+                    continue
+                try:
+                    x = float(row[0]); y = float(row[1])
+                except ValueError:
+                    continue
+                xs.append(x); ys.append(y)
+        return xs, ys
+
+    def _read_fsr_calibration_points(self, sensor: str):
+        # Lê pares (tensão, força) do CSV combinado salvo em calibracao_fsr/calibra_fsr/calibra_<sensor>.csv
+        import os, csv
+        out_dir = os.path.join('calibracao_fsr', 'calibra_fsr')
+        path = os.path.join(out_dir, f'calibra_{sensor}.csv')
+        xs, ys = [], []
+        if not os.path.isfile(path):
+            return xs, ys
+        with open(path, 'r', newline='', encoding='utf-8') as f:
+            rd = csv.reader(f)
+            header = next(rd, None)
+            if not header:
+                return xs, ys
+            cols = [c.strip().lower() for c in header]
+            i_v = cols.index('tensao') if 'tensao' in cols else (cols.index('voltage') if 'voltage' in cols else 1)
+            i_f = cols.index('forca') if 'forca' in cols else (cols.index('force') if 'force' in cols else 2)
+            for row in rd:
+                if len(row) <= max(i_v, i_f):
+                    continue
+                try:
+                    v = float(row[i_v]); ff = float(row[i_f])
+                except ValueError:
+                    continue
+                xs.append(v); ys.append(ff)
+        return xs, ys
+
+    def _get_flex_poly(self, sensor: str):
+        import numpy as np
+        # Prioriza função no backend
+        try:
+            if sensor in self.sensor_backend:
+                func = getattr(self.sensor_backend[sensor], 'calibration_function', None)
+                if func is not None:
+                    return func
+        except Exception:
+            pass
+        # Fallback: tentar ler do CSV via FlexCalibrador (ajuste pelos pontos)
+        try:
+            from Modules.flex_calibrador import FlexCalibrador
+            path = os.path.join('calibrations','flex', f'calibration_{sensor}.csv')
+            return FlexCalibrador().carregar_de_csv(path)
+        except Exception:
+            return None
+
+    def _get_fsr_poly(self, sensor: str):
+        # Usa função de calibração do backend se existir
+        try:
+            if sensor in self.sensor_backend:
+                func = getattr(self.sensor_backend[sensor], 'calibration_function', None)
+                if func is not None:
+                    return func
+        except Exception:
+            pass
+        # Fallback: carregar de CSV combinado via FSRCalibrador
+        try:
+            from Modules.fsr_calibrador import FSRCalibrador
+            out_dir = os.path.join('calibracao_fsr', 'calibra_fsr')
+            path = os.path.join(out_dir, f'calibra_{sensor}.csv')
+            return FSRCalibrador().carregar_calibracao_csv(path)
+        except Exception:
+            return None
+
+    def _draw_flex_calibration_plot(self):
+        if not self.is_flex_mode():
+            return
+        sel = self.combo_sensor.currentText() if self.combo_sensor.count()>0 else ''
+        self.flex_ax.cla()
+        self.flex_ax.set_title("Tensão (V) x Ângulo (°)")
+        self.flex_ax.set_xlabel("Tensão (V)")
+        self.flex_ax.set_ylabel("Ângulo (°)")
+        xs, ys = self._read_flex_calibration_points(sel)
+        if xs and ys:
+            self.flex_ax.scatter(xs, ys, c="#29b6f6", s=18, label="Pontos")
+            # Curva pelo polinômio salvo/carregado
+            poly = self._get_flex_poly(sel)
+            if poly is not None and len(xs) >= 2:
+                try:
+                    x_min, x_max = min(xs), max(xs)
+                    x_pad = max(0.05, 0.05*(x_max - x_min))
+                    import numpy as _np
+                    x_line = _np.linspace(max(0.0, x_min - x_pad), min(3.3, x_max + x_pad), 200)
+                    y_line = poly(x_line)
+                    self.flex_ax.plot(x_line, y_line, color="#ef5350", linewidth=2.0, label="Ajuste")
+                except Exception:
+                    pass
+        self.flex_ax.legend(loc='lower right')
+        # tema e draw
+        self._apply_theme_flex_plot(self._get_theme())
+        self.flex_canvas.draw()
+
+    def _draw_fsr_calibration_plot(self):
+        if self.is_flex_mode():
+            return
+        sel = self.combo_sensor.currentText() if self.combo_sensor.count()>0 else ''
+        self.fsr_eval_ax.cla()
+        self.fsr_eval_ax.set_title('FSR: Tensão (V) x Força (N)')
+        self.fsr_eval_ax.set_xlabel('Tensão (V)')
+        self.fsr_eval_ax.set_ylabel('Força (N)')
+        xs, ys = self._read_fsr_calibration_points(sel)
+        if xs and ys:
+            self.fsr_eval_ax.scatter(xs, ys, c='#26c6da', s=18, label='Pontos')
+            poly = self._get_fsr_poly(sel)
+            if poly is not None and len(xs) >= 2:
+                try:
+                    import numpy as _np
+                    x_min, x_max = min(xs), max(xs)
+                    x_pad = max(0.05, 0.05*(x_max - x_min))
+                    x_line = _np.linspace(max(0.0, x_min - x_pad), min(3.3, x_max + x_pad), 200)
+                    y_line = poly(x_line)
+                    self.fsr_eval_ax.plot(x_line, y_line, color='#ef5350', linewidth=2.0, label='Ajuste')
+                except Exception:
+                    pass
+        self.fsr_eval_ax.legend(loc='lower right')
+        self._apply_theme_fsr_eval_plot(self._get_theme())
+        self.fsr_eval_canvas.draw()
+
+    def start_verification(self):
+        if not self.is_flex_mode():
+            return
+        if self.combo_sensor.count()==0:
+            return
+        self.verif_points.clear()
+        self.verif_recording = True
+        self.verif_start_time = time.time()
+        self.btn_verif_start.setEnabled(False)
+        self.btn_verif_stop.setEnabled(True)
+        self.lbl_verif_time.setText("Tempo: 0.0s")
+        self.lbl_verif_samples.setText("Amostras: 0")
+        self.verif_timer.start(50)
+
+    def _fsr_verif_start(self):
+        if self.is_flex_mode() or self.combo_sensor.count()==0:
+            return
+        self.fsr_verif_points.clear()
+        self.fsr_verif_recording = True
+        self.fsr_verif_start_t = time.time()
+        self.btn_fsr_verif_start.setEnabled(False)
+        self.btn_fsr_verif_stop.setEnabled(True)
+        self.lbl_fsr_verif_time.setText('Tempo: 0.0s')
+        self.lbl_fsr_verif_samples.setText('Amostras: 0')
+        self.fsr_verif_timer.start(100)
+
+    def _collect_verif_point(self):
+        if not self.verif_recording:
+            return
+        sel = self.combo_sensor.currentText()
+        t = time.time() - (self.verif_start_time or time.time())
+        ang_flex = float(self.latest_readings.get(f"{sel}_angle", 0.0))
+        ang_gon = float(self.latest_readings.get('goniometer_angle', 0.0))
+        self.verif_points.append((t, ang_flex, ang_gon))
+        self.lbl_verif_time.setText(f"Tempo: {t:.1f}s")
+        self.lbl_verif_samples.setText(f"Amostras: {len(self.verif_points)}")
+        if self.flex_plot_mode == 'verif':
+            try:
+                self._draw_flex_verification_plot()
+            except Exception:
+                pass
+
+    def _fsr_verif_collect(self):
+        if not self.fsr_verif_recording:
+            return
+        sel = self.combo_sensor.currentText() or ''
+        t = time.time() - (self.fsr_verif_start_t or time.time())
+        force = float(self.latest_readings.get(f"{sel}_force", 0.0))
+        # arredonda tempo para 0.1s como no FSR
+        tr = round(t, 1)
+        if self.fsr_verif_points and abs(tr - self.fsr_verif_points[-1][0]) < 1e-6:
+            self.fsr_verif_points[-1] = (tr, force)
+        else:
+            self.fsr_verif_points.append((tr, force))
+        self.lbl_fsr_verif_time.setText(f'Tempo: {tr:.1f}s')
+        self.lbl_fsr_verif_samples.setText(f'Amostras: {len(self.fsr_verif_points)}')
+        if self.fsr_plot_mode == 'verif':
+            try:
+                self._draw_fsr_verification_plot()
+            except Exception:
+                pass
+
+    def stop_verification(self):
+        if not self.verif_recording:
+            return
+        self.verif_recording = False
+        self.verif_timer.stop()
+        self.btn_verif_start.setEnabled(True)
+        self.btn_verif_stop.setEnabled(False)
+        # Salvar em data_tests
+        try:
+            import os, csv
+            os.makedirs('data_tests', exist_ok=True)
+            sel = self.combo_sensor.currentText() or 'flex'
+            ts = int(time.time())
+            fname = f"test_{sel}_{ts}.csv"
+            path = os.path.join('data_tests', fname)
+            with open(path, 'w', newline='') as f:
+                w = csv.writer(f)
+                w.writerow(['time','flex_angle','goniometer_angle'])
+                for t, fa, ga in self.verif_points:
+                    w.writerow([f"{t:.6f}", f"{fa:.6f}", f"{ga:.6f}"])
+            self.lbl_verif_file.setText(f"Arq: {fname}")
+        except Exception as e:
+            QMessageBox.warning(self, "Aferição", f"Falha ao salvar aferição: {e}")
+
+    def _fsr_verif_stop(self):
+        if not self.fsr_verif_recording:
+            return
+        self.fsr_verif_recording = False
+        self.fsr_verif_timer.stop()
+        self.btn_fsr_verif_start.setEnabled(True)
+        self.btn_fsr_verif_stop.setEnabled(False)
+        # Salvar CSV
+        try:
+            import os, csv
+            os.makedirs('data_tests', exist_ok=True)
+            sel = self.combo_sensor.currentText() or 'fsr'
+            ts = int(time.time())
+            fname = f"test_{sel}_{ts}.csv"
+            path = os.path.join('data_tests', fname)
+            with open(path, 'w', newline='', encoding='utf-8') as f:
+                w = csv.writer(f)
+                w.writerow(['time','fsr_force'])
+                for t, ff in self.fsr_verif_points:
+                    w.writerow([f"{t:.3f}", f"{ff:.6f}"])
+            self.lbl_fsr_verif_file.setText(f'Arq: {fname}')
+        except Exception as e:
+            QMessageBox.warning(self, 'Aferição FSR', f'Falha ao salvar aferição: {e}')
+
+    def plot_verification(self):
+        # Muda toggle para aferição e desenha; calcula métricas
+        self.flex_plot_mode = 'verif'
+        self.btn_plot_calib.setChecked(False); self.btn_plot_verif.setChecked(True)
+        self.btn_plot_calib.setProperty('selected','false'); self.btn_plot_verif.setProperty('selected','true')
+        for b in (self.btn_plot_calib, self.btn_plot_verif):
+            b.style().unpolish(b); b.style().polish(b); b.update()
+        self.flex_verif_frame.setVisible(True)
+        try:
+            self._draw_flex_verification_plot()
+        except Exception:
+            pass
+
+    def _draw_flex_verification_plot(self):
+        if not self.is_flex_mode():
+            return
+        self.flex_ax.cla()
+        self.flex_ax.set_title("Aferição: Ângulo x Tempo")
+        self.flex_ax.set_xlabel("Tempo (s)")
+        self.flex_ax.set_ylabel("Ângulo (°)")
+        if not self.verif_points:
+            self.flex_canvas.draw()
+            return
+        import numpy as _np
+        t = _np.array([p[0] for p in self.verif_points])
+        fa = _np.array([p[1] for p in self.verif_points])
+        ga = _np.array([p[2] for p in self.verif_points])
+        self.flex_ax.plot(t, fa, label='Flex (°)', color='#29b6f6')
+        self.flex_ax.plot(t, ga, label='Goniômetro (°)', color='#ffa726')
+        self.flex_ax.legend(loc='lower right')
+        # métricas
+        try:
+            mae = float(_np.mean(_np.abs(fa - ga)))
+            rmse = float(_np.sqrt(_np.mean((fa - ga)**2)))
+            corr = float(_np.corrcoef(fa, ga)[0,1]) if len(fa) > 1 else float('nan')
+            self.lbl_verif_metrics.setText(f"MAE: {mae:.2f} | RMSE: {rmse:.2f} | Corr: {corr:.2f}")
+        except Exception:
+            self.lbl_verif_metrics.setText("MAE: -- | RMSE: -- | Corr: --")
+        self._apply_theme_flex_plot(self._get_theme())
+        self.flex_canvas.draw()
+
+    def _draw_fsr_verification_plot(self):
+        if self.is_flex_mode():
+            return
+        import numpy as _np
+        self.fsr_eval_ax.cla()
+        self.fsr_eval_ax.set_title('FSR: Verificação (Força)')
+        self.fsr_eval_ax.set_xlabel('Tempo (s)')
+        self.fsr_eval_ax.set_ylabel('Força (N)')
+        if self.fsr_verif_points:
+            t = _np.array([p[0] for p in self.fsr_verif_points])
+            ff = _np.array([p[1] for p in self.fsr_verif_points])
+            self.fsr_eval_ax.plot(t, ff, label='FSR (N)', color='#26c6da')
+        if self.fsr_verif_force_ref[0] and self.fsr_verif_force_ref[1]:
+            tr, fr = self.fsr_verif_force_ref
+            self.fsr_eval_ax.plot(tr, fr, label='Instron (N)', color='#ffa726')
+        self.fsr_eval_ax.legend(loc='lower right')
+        # métricas se ambas séries disponíveis (após alinhamento)
+        try:
+            if self.fsr_verif_points and self.fsr_verif_force_ref[0]:
+                # interpola referência nos tempos do fsr
+                t_fsr = _np.array([p[0] for p in self.fsr_verif_points])
+                f_fsr = _np.array([p[1] for p in self.fsr_verif_points])
+                t_ref, f_ref = _np.array(self.fsr_verif_force_ref[0]), _np.array(self.fsr_verif_force_ref[1])
+                t_min = max(t_ref.min(), t_fsr.min())
+                t_max = min(t_ref.max(), t_fsr.max())
+                mask = (t_fsr >= t_min) & (t_fsr <= t_max)
+                if mask.any():
+                    t_sel = t_fsr[mask]; f_sel = f_fsr[mask]
+                    f_ref_i = _np.interp(t_sel, t_ref, f_ref)
+                    mae = float(_np.mean(_np.abs(f_sel - f_ref_i)))
+                    rmse = float(_np.sqrt(_np.mean((f_sel - f_ref_i)**2)))
+                    corr = float(_np.corrcoef(f_sel, f_ref_i)[0,1]) if len(f_sel) > 1 else float('nan')
+                    self.lbl_fsr_verif_metrics.setText(f"MAE: {mae:.3f} | RMSE: {rmse:.3f} | Corr: {corr:.2f}")
+        except Exception:
+            self.lbl_fsr_verif_metrics.setText('MAE: -- | RMSE: -- | Corr: --')
+        self._apply_theme_fsr_eval_plot(self._get_theme())
+        self.fsr_eval_canvas.draw()
+
+    def _fsr_verif_plot_metrics(self):
+        # garante modo de verificação e plota com métricas
+        self.fsr_plot_mode = 'verif'
+        self.btn_fsr_plot_calib.setChecked(False); self.btn_fsr_plot_verif.setChecked(True)
+        self.btn_fsr_plot_calib.setProperty('selected','false'); self.btn_fsr_plot_verif.setProperty('selected','true')
+        for b in (self.btn_fsr_plot_calib, self.btn_fsr_plot_verif): b.style().unpolish(b); b.style().polish(b); b.update()
+        self.fsr_verif_frame.setVisible(True)
+        try:
+            self._draw_fsr_verification_plot()
+        except Exception:
+            pass
+
+    def _fsr_verif_import_ref(self):
+        from PyQt6.QtWidgets import QFileDialog
+        path, _ = QFileDialog.getOpenFileName(self, 'Abrir referência Instron (CSV)', os.getcwd(), 'CSV (*.csv)')
+        if not path:
+            return
+        try:
+            from Modules.fsr_calibrador import FSRCalibrador
+            t, f, _out = FSRCalibrador().tratar_referencia(path)
+            self.fsr_verif_force_ref = (t, f)
+            self.lbl_fsr_verif_file.setText(f'Arq: {os.path.basename(path)}')
+            if self.fsr_plot_mode == 'verif':
+                self._draw_fsr_verification_plot()
+        except Exception as e:
+            QMessageBox.warning(self, 'Instron', f'Falha ao importar referência: {e}')
+
+    def _fsr_verif_align(self):
+        # Alinha referência Instron com série FSR de verificação usando pico
+        from Modules.fsr_calibrador import FSRCalibrador
+        if not (self.fsr_verif_points and self.fsr_verif_force_ref[0]):
+            return
+        t_fsr = [p[0] for p in self.fsr_verif_points]
+        f_fsr = [p[1] for p in self.fsr_verif_points]
+        t_ref, f_ref = self.fsr_verif_force_ref
+        cal = FSRCalibrador()
+        t_shifted, _f_dummy, offset = cal.alinhar_pelo_pico(t_ref, f_ref, t_fsr, f_fsr)
+        self._fsr_verif_align_offset = offset
+        self.fsr_verif_points = list(zip(t_shifted, f_fsr))
+        if self.fsr_plot_mode == 'verif':
+            self._draw_fsr_verification_plot()
+
+    def open_verification_file(self):
+        from PyQt6.QtWidgets import QFileDialog
+        path, _ = QFileDialog.getOpenFileName(self, "Abrir aferição Flex", os.getcwd(), "CSV (*.csv)")
+        if not path:
+            return
+        try:
+            import csv
+            pts = []
+            with open(path, 'r', newline='', encoding='utf-8') as f:
+                rd = csv.reader(f)
+                header = next(rd, None) or []
+                cols = [c.strip().lower() for c in header]
+                # tenta mapear colunas
+                i_t = cols.index('time') if 'time' in cols else 0
+                i_fa = cols.index('flex_angle') if 'flex_angle' in cols else 1
+                i_ga = cols.index('goniometer_angle') if 'goniometer_angle' in cols else 2
+                for row in rd:
+                    if len(row) <= max(i_t, i_fa, i_ga):
+                        continue
+                    try:
+                        t = float(row[i_t]); fa = float(row[i_fa]); ga = float(row[i_ga])
+                    except ValueError:
+                        continue
+                    pts.append((t, fa, ga))
+            if not pts:
+                return
+            self.verif_points = pts
+            self.lbl_verif_file.setText(f"Arq: {os.path.basename(path)}")
+            # garante modo aferição
+            if self.flex_plot_mode != 'verif':
+                self._flex_plot_toggle_clicked.__call__
+                self.flex_plot_mode = 'verif'
+                self.btn_plot_calib.setChecked(False); self.btn_plot_verif.setChecked(True)
+                self.btn_plot_calib.setProperty('selected','false'); self.btn_plot_verif.setProperty('selected','true')
+                for b in (self.btn_plot_calib, self.btn_plot_verif):
+                    b.style().unpolish(b); b.style().polish(b); b.update()
+                self.flex_verif_frame.setVisible(True)
+            self._draw_flex_verification_plot()
+        except Exception as e:
+            QMessageBox.warning(self, "Aferição Flex", f"Falha ao abrir arquivo: {e}")
 
     # --------------- FSR Workflow ---------------
     def _import_ref(self):
@@ -931,18 +1749,16 @@ class CalibrationPage(QWidget):
         self.fsr_canvas.draw()
 
     def _align_series(self):
-        # Alinha pico de força com pico de tensão
+        # Delegar alinhamento ao FSRCalibrador
+        from Modules.fsr_calibrador import FSRCalibrador
         t_force, f = self.fsr_force_ref
         t_fsr, v = self.fsr_rec_loaded
         if not (t_force and f and t_fsr and v):
             return
-        import numpy as np
-        iF = int(np.argmax(f)); iV = int(np.argmax(v))
-        tF_peak = t_force[iF]; tV_peak = t_fsr[iV]
-        self._align_offset = tF_peak - tV_peak
-        # Aplica deslocamento na série FSR (tensão)
-        t_shifted = [t + self._align_offset for t in t_fsr]
-        self.fsr_rec_loaded = (t_shifted, v)
+        cal = FSRCalibrador()
+        t_shifted, v_out, offset = cal.alinhar_pelo_pico(t_force, f, t_fsr, v)
+        self._align_offset = offset
+        self.fsr_rec_loaded = (t_shifted, v_out)
         self._update_fsr_overlay_plot()
 
     def _calibrate_fsr(self):
@@ -956,6 +1772,7 @@ class CalibrationPage(QWidget):
             QMessageBox.information(self, "Calibração", "Importe referência e gravação FSR, e alinhe antes de calibrar.")
             return
         import numpy as np
+        from Modules.fsr_calibrador import FSRCalibrador
         # Interpola força nos tempos do FSR, usando apenas faixa sobreposta
         t_min = max(min(t_force), min(t_fsr))
         t_max = min(max(t_force), max(t_fsr))
@@ -971,11 +1788,7 @@ class CalibrationPage(QWidget):
         os.makedirs(out_dir, exist_ok=True)
         out_path = os.path.join(out_dir, f"calibra_{sel}.csv")
         try:
-            with open(out_path, 'w', newline='', encoding='utf-8') as g:
-                w = csv.writer(g)
-                w.writerow(['tempo','tensao','forca'])
-                for t_i, vv, ff in zip(t_sel, v_sel, f_interp):
-                    w.writerow([f"{t_i:.3f}", f"{vv:.6f}", f"{ff:.6f}"])
+            FSRCalibrador().exportar_calibracao_combinada(out_path, t_sel.tolist(), v_sel.tolist(), f_interp.tolist())
         except Exception as e:
             QMessageBox.warning(self, "Exportação", f"Falha ao salvar calibração: {e}")
             return
@@ -1986,6 +2799,12 @@ class MainWindow(QMainWindow):
         try:
             if hasattr(self, 'page_sensors') and hasattr(self.page_sensors, 'unified_plot'):
                 self.page_sensors.unified_plot.apply_theme(theme)
+        except Exception:
+            pass
+        # Propaga tema para a página de calibração (ambos: PlotManager e figuras auxiliares)
+        try:
+            if hasattr(self, 'page_calib'):
+                self.page_calib.apply_theme(theme)
         except Exception:
             pass
 

@@ -20,7 +20,8 @@ class BLEManager:
         try:
             self.client = BleakClient(self.address)
             await self.client.connect()
-            if not await self.client.is_connected():
+            # Em versões recentes do Bleak, is_connected é propriedade booleana
+            if not bool(self.client.is_connected):
                 print("[BLE] Falha ao conectar.")
                 return
             await self.client.start_notify(self.characteristic_uuid, self.notification_handler)
@@ -42,7 +43,7 @@ class BLEManager:
                         await self.client.stop_notify(self.characteristic_uuid)
                     except Exception:
                         pass
-                if await self.client.is_connected():
+                if bool(self.client.is_connected):
                     await self.client.disconnect()
             except Exception as e:
                 print(f"[BLE] Erro ao desconectar: {e}")

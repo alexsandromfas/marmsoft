@@ -1,8 +1,16 @@
-"""Provide basic filtering and calibration utilities for sensors."""
+"""Provide basic filtering and calibration utilities for sensors.
+
+This module now delegates calibration fitting/loading responsibilities to
+specific calibrator managers without changing the public API/behavior.
+"""
 
 import numpy as np
 import csv
 import os
+from typing import List, Tuple
+
+from .flex_calibrador import FlexCalibrador
+from .fsr_calibrador import FSRCalibrador
 
 class SensorData:
     """Store filtered readings and calibration for a single sensor."""
@@ -21,9 +29,13 @@ class SensorData:
         return self.filtered_value
 
     def calibrate_with_data_points(self, data_points):
-        """Create a polynomial calibration curve from ``data_points``."""
-        voltages, values = zip(*data_points)
-        self.calibration_function = np.poly1d(np.polyfit(voltages, values, deg=2))
+        """Create a polynomial calibration curve from ``data_points``.
+
+        Behavior preserved: degree-2 polynomial fit as before, now via FlexCalibrador.
+        """
+        flex_cal = FlexCalibrador(grau=2)
+        func = flex_cal.ajustar_com_pontos(data_points)
+        self.calibration_function = func
 
     def get_angle(self, tension):
         """Return a filtered angle computed from ``tension``."""
@@ -43,67 +55,62 @@ class SensorData:
         return self.filtered_force
 
     def load_calibration_from_file(self, csv_filename):
-        """Load calibration points from ``csv_filename``."""
+        """Load calibration for Flex from ``csv_filename``.
+
+        Prefer saved polynomial coefficients (row starting with '#COEFFICIENTS')
+        to avoid re-fitting; if not present, fall back to fitting points as before.
+        """
         if not os.path.exists(csv_filename):
             print(f"Arquivo de calibração {csv_filename} não encontrado.")
             return False
-        with open(csv_filename, 'r', newline='') as csvfile:
-            reader = csv.reader(csvfile)
-            header = next(reader, None)
-            if not header:
-                return False
-            # Suporta modo antigo (Voltage,Angle) e genérico (x,y)
-            data_points = []
-            for row in reader:
-                if len(row) < 2:
-                    continue
-                try:
-                    x = float(row[0]); y = float(row[1])
-                except ValueError:
-                    continue
-                data_points.append((x, y))
-        self.calibrate_with_data_points(data_points)
+        # Primeiro, tenta encontrar linha de coeficientes
+        coefs = None
+        try:
+            with open(csv_filename, 'r', newline='') as csvfile:
+                reader = csv.reader(csvfile)
+                header = next(reader, None)
+                # varre todas as linhas e usa a última ocorrência encontrada
+                for row in reader:
+                    if not row:
+                        continue
+                    tag = str(row[0]).strip()
+                    if tag.upper() == '#COEFFICIENTS' and len(row) >= 2:
+                        try:
+                            cand = [float(c) for c in row[1:] if c is not None and str(c).strip() != '']
+                            if cand:
+                                coefs = cand
+                        except ValueError:
+                            # ignora linhas inválidas
+                            pass
+        except Exception:
+            coefs = None
+        if coefs:
+            # Constrói polinômio diretamente a partir dos coeficientes salvos
+            self.calibration_function = np.poly1d(coefs)
+            print(f"Dados de calibração (coeficientes) carregados de {csv_filename}")
+            return True
+        # Sem coeficientes – mantém compatibilidade lendo pontos e ajustando via FlexCalibrador
+        flex_cal = FlexCalibrador(grau=2)
+        func = flex_cal.carregar_de_csv(csv_filename)
+        if func is None:
+            return False
+        self.calibration_function = func
         print(f"Dados de calibração carregados de {csv_filename}")
         return True
 
     def load_fsr_calibration_from_file(self, csv_filename: str) -> bool:
         """Load FSR calibration from a combined CSV with columns including 'tensao' and 'forca'.
 
-        Expected header contains 'tensao' and 'forca' (case-insensitive). Builds a polynomial mapping
-        voltage (tensão) -> force (força).
+        Behavior preserved; internally delegates parsing/fit to FSRCalibrador and uses a degree-2 fit.
         """
         if not os.path.exists(csv_filename):
             print(f"Arquivo de calibração FSR {csv_filename} não encontrado.")
             return False
-        with open(csv_filename, 'r', newline='', encoding='utf-8') as f:
-            reader = csv.reader(f)
-            header = next(reader, None)
-            if not header:
-                return False
-            cols = [h.strip().lower() for h in header]
-            try:
-                i_tensao = cols.index('tensao')
-                i_forca = cols.index('forca')
-            except ValueError:
-                # tenta variantes inglesas
-                try:
-                    i_tensao = cols.index('voltage')
-                    i_forca = cols.index('force')
-                except ValueError:
-                    print("Cabeçalho não possui 'tensao/forca' ou 'voltage/force'.")
-                    return False
-            pairs = []
-            for row in reader:
-                if len(row) <= max(i_tensao, i_forca):
-                    continue
-                try:
-                    v = float(row[i_tensao]); f = float(row[i_forca])
-                except ValueError:
-                    continue
-                pairs.append((v, f))
-        if not pairs:
+        fsr_cal = FSRCalibrador()
+        func = fsr_cal.carregar_calibracao_csv(csv_filename)
+        if func is None:
             print("Nenhum par válido v,f encontrado no CSV de calibração FSR.")
             return False
-        self.calibrate_with_data_points(pairs)
+        self.calibration_function = func
         print(f"Calibração FSR aplicada a partir de {csv_filename}")
         return True

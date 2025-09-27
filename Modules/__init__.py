@@ -1,13 +1,14 @@
 """Convenience imports for the :mod:`Modules` package."""
 
 from .ble_manager import *  # noqa: F401,F403
-from .calibration_manager import *  # noqa: F401,F403
+#from .legacy.calibration_manager import *  # noqa: F401,F403
 from .goniometer_manager import *  # noqa: F401,F403
 from .sensor_data import *  # noqa: F401,F403
 from .tests import *  # noqa: F401,F403
 # Legacy Tk GUI desativada: comentar import para evitar dependência de plot_manager Tk
 # from .gui_manager import *  # noqa: F401,F403
 from .fsr_calibrador import FSRCalibrador  # noqa: F401
+from .flex_calibrador import FlexCalibrador  # noqa: F401
 
 # Removido: from .plot_manager import *
 # O antigo PlotManager (Tk) e versões intermediárias foram movidos para pasta legacy.
