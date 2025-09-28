@@ -631,10 +631,16 @@ class CalibrationPage(QWidget):
         fsr_actions = QHBoxLayout(); fsr_actions.setSpacing(10)
         self.btn_align = QPushButton("Alinhar")
         self.btn_fsr_calibrate = QPushButton("Calibrar")
+        # Seletor de modelo de curva
+        from PyQt6.QtWidgets import QComboBox as _QCB
+        self.cb_fsr_model = _QCB(); self.cb_fsr_model.addItems(["Polinomial (2º)", "Racional Quadrática"])  # 'poly2', 'rational_q'
+        self.cb_fsr_model.setToolTip("Escolha o tipo de curva para ajustar (tensão -> força)")
         for b in (self.btn_align, self.btn_fsr_calibrate):
             b.setProperty('class','action')
         fsr_actions.addWidget(self.btn_align)
         fsr_actions.addWidget(self.btn_fsr_calibrate)
+        fsr_actions.addWidget(QLabel("Curva:"))
+        fsr_actions.addWidget(self.cb_fsr_model)
         fsr_actions.addStretch()
         outer.addLayout(fsr_actions)
 
@@ -1273,6 +1279,22 @@ class CalibrationPage(QWidget):
         self.fsr_eval_ax.set_xlabel('Tensão (V)')
         self.fsr_eval_ax.set_ylabel('Força (N)')
         xs, ys = self._read_fsr_calibration_points(sel)
+        # Descobre o modelo salvo para rotular a curva
+        model_label = 'Ajuste'
+        try:
+            import os, csv as _csv
+            path = os.path.join('calibracao_fsr', 'calibra_fsr', f'calibra_{sel}.csv')
+            if os.path.isfile(path):
+                with open(path, 'r', newline='', encoding='utf-8') as _f:
+                    rd = _csv.reader(_f)
+                    _ = next(rd, None)
+                    for row in rd:
+                        if row and str(row[0]).strip().upper() == '#MODEL' and len(row) >= 2:
+                            m = row[1].strip().lower()
+                            model_label = 'Ajuste (Racional)' if m in ('rational_q','rational','rational_zero') else 'Ajuste (Polinomial)'
+                            break
+        except Exception:
+            pass
         if xs and ys:
             self.fsr_eval_ax.scatter(xs, ys, c='#26c6da', s=18, label='Pontos')
             poly = self._get_fsr_poly(sel)
@@ -1283,7 +1305,7 @@ class CalibrationPage(QWidget):
                     x_pad = max(0.05, 0.05*(x_max - x_min))
                     x_line = _np.linspace(max(0.0, x_min - x_pad), min(3.3, x_max + x_pad), 200)
                     y_line = poly(x_line)
-                    self.fsr_eval_ax.plot(x_line, y_line, color='#ef5350', linewidth=2.0, label='Ajuste')
+                    self.fsr_eval_ax.plot(x_line, y_line, color='#ef5350', linewidth=2.0, label=model_label)
                 except Exception:
                     pass
         self.fsr_eval_ax.legend(loc='lower right')
@@ -1783,24 +1805,42 @@ class CalibrationPage(QWidget):
         t_sel = np.array([t for t, m in zip(t_fsr, mask) if m])
         v_sel = np.array([vv for vv, m in zip(v, mask) if m])
         f_interp = np.interp(t_sel, t_force, f)
-        # Salva CSV combinado
+        # Ajuste de curva conforme seleção
+        model_key = 'poly2' if self.cb_fsr_model.currentIndex() == 0 else 'rational_q'
+        cal = FSRCalibrador()
+        func, coefs, model_used = cal.ajustar_curva(v_sel.tolist(), f_interp.tolist(), model=model_key)
+        # Aviso de fallback (se SciPy indisponível para racional)
+        if model_key == 'rational_q' and model_used != 'rational_q':
+            QMessageBox.information(
+                self,
+                'Curva Racional Indisponível',
+                'Não foi possível ajustar a curva racional quadrática (biblioteca SciPy ausente).\n'
+                'Foi aplicado automaticamente o ajuste Polinomial de 2º grau.'
+            )
+        # Salva CSV combinado com metadados
         out_dir = os.path.join('calibracao_fsr', 'calibra_fsr')
         os.makedirs(out_dir, exist_ok=True)
         out_path = os.path.join(out_dir, f"calibra_{sel}.csv")
         try:
-            FSRCalibrador().exportar_calibracao_combinada(out_path, t_sel.tolist(), v_sel.tolist(), f_interp.tolist())
+            cal.exportar_calibracao_combinada(out_path, t_sel.tolist(), v_sel.tolist(), f_interp.tolist(), model=model_used, coefs=coefs)
         except Exception as e:
             QMessageBox.warning(self, "Exportação", f"Falha ao salvar calibração: {e}")
             return
         # Aplica calibração no backend (voltage->force) usando pares (tensão, força)
         try:
             if sel in self.sensor_backend:
-                pairs = list(zip(v_sel.tolist(), f_interp.tolist()))
-                self.sensor_backend[sel].calibrate_with_data_points(pairs)
+                # aplica função diretamente baseada no ajuste e guarda
+                self.sensor_backend[sel].calibration_function = func
         except Exception as e:
             QMessageBox.warning(self, "Calibração", f"Falha ao aplicar calibração: {e}")
             return
         QMessageBox.information(self, "Calibração", f"Calibração salva em {out_path} e aplicada.")
+        # Redesenha o plot de calibração FSR com a nova curva
+        try:
+            if not self.is_flex_mode() and self.fsr_plot_mode == 'calib':
+                self._draw_fsr_calibration_plot()
+        except Exception:
+            pass
 
 class TestsPage(QWidget):
     def __init__(self):

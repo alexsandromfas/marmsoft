@@ -1,0 +1,25 @@
+Deformação : Distância inicial Axial (Fonte de Deformação);-19,999;mm;;;;
+Dimensão : Altura da bigorna;20;mm;;;;
+Dimensão : Área;304,805;mm^2;;;;
+Máximo Esforço à compressiva : Carga compressivaemMáximo Esforço à compressiva;4,686;N;;;;
+Máximo Esforço à compressiva : Deformaçao compressivaemMáximo Esforço à compressiva;3,861;%;;;;
+Máximo Esforço à compressiva : EnergiaemMáximo Esforço à compressiva;0,001;J;;;;
+Máximo Esforço à compressiva : Máximo Esforço à compressiva;0,015;MPa;;;;
+Máximo Esforço à compressiva : Extensão compressivaemMáximo Esforço à compressiva;0,772;mm;;;;
+Máximo Esforço à compressiva : TempoemMáximo Esforço à compressiva;46,33;sec;;;;
+Máximo Extensão compressiva : Carga compressivaemMáximo Extensão compressiva;0;N;;;;
+Máximo Extensão compressiva : Deformaçao compressivaemMáximo Extensão compressiva;6,813;%;;;;
+Máximo Extensão compressiva : EnergiaemMáximo Extensão compressiva;0,002;J;;;;
+Máximo Extensão compressiva : Máximo Extensão compressiva;1,362;mm;;;;
+Máximo Extensão compressiva : TempoemMáximo Extensão compressiva;81,748;sec;;;;
+Módulo (Automático) : Módulo (Automático);3,074;MPa;;;;
+;;;;;;
+Tempo;Extensão;Carga;Deformaçao compressiva;Esforço à compressiva;Extensão compressiva;Carga compressiva
+(sec);(mm);(N);(mm/mm);(MPa);(mm);(N)
+0,1;-0,00193;0,00009;0;0;0,001;1
+0,2;-0,00434;0,00008;0;0;0,003;2
+0,3;-0,00621;0,00027;0;0;0,005;3
+0,4;-0,00793;0,00009;0;0;0,007;4
+0,5;-0,00954;0,0002;0;0;0,008;6
+0,6;-0,01136;0,00037;0,001;0;0,01;8
+0,7;-0,01286;0,00013;0,001;0;0,012;10

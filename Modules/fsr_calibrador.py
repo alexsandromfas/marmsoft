@@ -15,7 +15,12 @@ class FSRCalibrador:
     def __init__(self):
         # future: parameters for thresholds/smoothing can be passed here
         self.noise_threshold_n = 0.005  # valores absolutos abaixo serão truncados para 0 N
-        self.time_round_decimals = 3    # arredondar tempo para 0.001 s
+        self.time_round_decimals = 1    # arredondar tempo para 0.1 s
+
+    @staticmethod
+    def rational_zero(v, a, b, d, e):
+        """Rational model with F(0)=0 forced: F(V) = (a V^2 + b V) / (d V + e)."""
+        return (a * np.square(v) + b * v) / (d * v + e)
 
     def tratar_referencia(self, csv_path: str, out_dir: str = 'calibracao_fsr/forca_tratados') -> Tuple[List[float], List[float], str]:
         """Importa um CSV bruto de força, limpa e salva a versão tratada.
@@ -25,7 +30,7 @@ class FSRCalibrador:
         - Usa colunas 'Tempo' e 'Carga compressiva' (ou 'Carga' se não houver a primeira).
         - Converte vírgula decimal para ponto e remove aspas.
         - Força em Newtons é convertida para valor absoluto e pequenos ruídos (< 0.005 N) viram 0.
-        - Tempo é arredondado para 0.001 s; amostras com o mesmo tempo arredondado são agregadas por média.
+    - Tempo é arredondado para 0.1 s; amostras com o mesmo tempo arredondado são agregadas por média.
         - Salva arquivo tratado como CSV (separador vírgula, ponto decimal) com cabeçalho: tempo,forca.
 
         Retorna (tempos, forcas, caminho_arquivo_tratado).
@@ -102,46 +107,63 @@ class FSRCalibrador:
             w = csv.writer(f)
             w.writerow(['tempo', 'forca'])
             for t, fv in zip(times, forces):
-                w.writerow([f"{t:.3f}", f"{fv:.6f}"])
+                w.writerow([f"{t:.1f}", f"{fv:.6f}"])
 
         return times, forces, out_path
 
-    def carregar_calibracao_csv(self, csv_filename: str) -> Optional[np.poly1d]:
-        """Lê um CSV combinado com colunas 'tensao' e 'forca' (ou 'voltage'/'force') e
-        retorna uma função polinomial de calibração (grau 2) mapeando tensão -> força.
+    def carregar_calibracao_csv(self, csv_filename: str) -> Optional[callable]:
+        """Carrega uma calibração FSR a partir de CSV combinado.
 
-        Compatível com o comportamento atual usado em SensorData.load_fsr_calibration_from_file.
+        Preferência:
+        1) Se houver linhas de metadados com '#MODEL' e '#COEFFICIENTS', monta a função
+           diretamente desses coeficientes.
+        2) Caso contrário, tenta carregar pontos (tensao, forca) e ajustar polinômio de 2º grau.
         """
         import csv
         if not os.path.exists(csv_filename):
             return None
+        model = None
+        coefs: Optional[List[float]] = None
+        pares: List[Tuple[float, float]] = []
         with open(csv_filename, 'r', newline='', encoding='utf-8') as f:
             reader = csv.reader(f)
             header = next(reader, None)
             if not header:
                 return None
             cols = [h.strip().lower() for h in header]
-            try:
-                i_tensao = cols.index('tensao')
-                i_forca = cols.index('forca')
-            except ValueError:
-                try:
-                    i_tensao = cols.index('voltage')
-                    i_forca = cols.index('force')
-                except ValueError:
-                    return None
-            pares: List[Tuple[float, float]] = []
+            # tenta encontrar índices de colunas de dados (tensao/forca)
+            i_tensao = cols.index('tensao') if 'tensao' in cols else (cols.index('voltage') if 'voltage' in cols else -1)
+            i_forca  = cols.index('forca')  if 'forca'  in cols else (cols.index('force')   if 'force'   in cols else -1)
             for row in reader:
-                if len(row) <= max(i_tensao, i_forca):
+                if not row:
                     continue
-                try:
-                    v = float(row[i_tensao]); f = float(row[i_forca])
-                except ValueError:
+                tag = str(row[0]).strip()
+                if tag.upper() == '#MODEL' and len(row) >= 2:
+                    model = row[1].strip().lower()
                     continue
-                pares.append((v, f))
+                if tag.upper() == '#COEFFICIENTS' and len(row) >= 2:
+                    try:
+                        coefs = [float(c) for c in row[1:] if str(c).strip() != '']
+                    except ValueError:
+                        coefs = None
+                    continue
+                # dados normais
+                if i_tensao >= 0 and i_forca >= 0 and len(row) > max(i_tensao, i_forca):
+                    try:
+                        v = float(row[i_tensao]); ff = float(row[i_forca])
+                    except ValueError:
+                        continue
+                    pares.append((v, ff))
+        # Se houver coeficientes + modelo, monta função diretamente
+        if model and coefs:
+            if model in ('poly2', 'polynomial2', 'polynomial'):
+                return np.poly1d(coefs)
+            if model in ('rational_q', 'rational', 'rational_zero') and len(coefs) >= 4:
+                a, b, d, e = coefs[:4]
+                return lambda v: FSRCalibrador.rational_zero(np.asarray(v), a, b, d, e)
+        # Fallback: ajustar polinômio 2º de pontos
         if not pares:
             return None
-        # ajuste polinomial de 2º grau como no código original
         voltages, values = zip(*pares)
         return np.poly1d(np.polyfit(voltages, values, deg=2))
 
@@ -157,14 +179,24 @@ class FSRCalibrador:
         t_shifted = [t + offset for t in t_tensao]
         return t_shifted, v, offset
 
-    def exportar_calibracao_combinada(self, out_path: str, t_sel: List[float], v_sel: List[float], f_interp: List[float]) -> None:
+    def exportar_calibracao_combinada(self, out_path: str, t_sel: List[float], v_sel: List[float], f_interp: List[float], model: Optional[str] = None, coefs: Optional[List[float]] = None) -> None:
+        """Exporta CSV de calibração final contendo pontos e, opcionalmente, modelo e coeficientes.
+
+        - tempo é gravado com 1 casa decimal (alinhado com arredondamento global)
+        - inclui linhas de metadados no final: '#MODEL,<model>' e '#COEFFICIENTS,<c1>,<c2>,...'
+        """
         import csv, os
         os.makedirs(os.path.dirname(out_path) or '.', exist_ok=True)
         with open(out_path, 'w', newline='', encoding='utf-8') as g:
             w = csv.writer(g)
             w.writerow(['tempo','tensao','forca'])
             for t_i, vv, ff in zip(t_sel, v_sel, f_interp):
-                w.writerow([f"{t_i:.3f}", f"{vv:.6f}", f"{ff:.6f}"])
+                w.writerow([f"{t_i:.1f}", f"{vv:.6f}", f"{ff:.6f}"])
+            # Metadados (modelo/coeficientes) ao final
+            if model:
+                w.writerow(['#MODEL', model])
+            if coefs:
+                w.writerow(['#COEFFICIENTS', *[f"{c:.16g}" for c in coefs]])
 
     def append_coeficientes_csv(self, caminho_csv: str, poly: np.poly1d) -> None:
         import csv
@@ -174,4 +206,49 @@ class FSRCalibrador:
         with open(caminho_csv, 'a', newline='') as f:
             w = csv.writer(f)
             w.writerow(['#COEFFICIENTS', *[f"{c:.16g}" for c in coefs]])
+
+    # --------------------- Ajuste (fit) de curvas ---------------------
+    def ajustar_curva(self, v: List[float], f: List[float], model: str = 'poly2') -> Tuple[callable, List[float], str]:
+        """Ajusta curva tensão->força.
+
+        model:
+          - 'poly2': polinomial de 2º grau (np.polyfit)
+          - 'rational_q': racional quadrática com F(0)=0, parâmetros [a,b,d,e]
+
+        Retorna (funcao, coeficientes, model).
+        """
+        v_arr = np.asarray(v, dtype=float)
+        f_arr = np.asarray(f, dtype=float)
+        # Limpeza básica: remover pontos muito próximos de zero (repouso) para melhor ajuste
+        mask_nonzero = ~((v_arr <= 0.01) & (f_arr <= 0.01))
+        v1 = v_arr[mask_nonzero]; f1 = f_arr[mask_nonzero]
+        # Ordenar
+        order = np.argsort(v1)
+        v1 = v1[order]; f1 = f1[order]
+        # Ancorar origem (0,0)
+        if v1.size == 0 or v1[0] > 1e-6:
+            v_fit = np.concatenate([[0.0], v1])
+            f_fit = np.concatenate([[0.0], f1])
+        else:
+            v_fit = v1; f_fit = f1
+        m = model.lower().strip()
+        if m == 'rational_q':
+            try:
+                import importlib
+                curve_fit = importlib.import_module('scipy.optimize').curve_fit
+            except Exception:
+                # fallback para poly2 se scipy indisponível
+                coefs = np.polyfit(v_fit, f_fit, deg=2)
+                func = np.poly1d(coefs)
+                return func, list(map(float, coefs)), 'poly2'
+            p0 = [0.1, 0.1, 0.1, 1.0]
+            params, _cov = curve_fit(FSRCalibrador.rational_zero, v_fit, f_fit, p0=p0, maxfev=30000)
+            a, b, d, e = [float(x) for x in params]
+            func = lambda vv: FSRCalibrador.rational_zero(np.asarray(vv), a, b, d, e)
+            return func, [a, b, d, e], 'rational_q'
+        else:
+            # poly2
+            coefs = np.polyfit(v_fit, f_fit, deg=2)
+            func = np.poly1d(coefs)
+            return func, list(map(float, coefs)), 'poly2'
 

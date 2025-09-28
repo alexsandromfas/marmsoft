@@ -101,7 +101,7 @@ class SensorData:
     def load_fsr_calibration_from_file(self, csv_filename: str) -> bool:
         """Load FSR calibration from a combined CSV with columns including 'tensao' and 'forca'.
 
-        Behavior preserved; internally delegates parsing/fit to FSRCalibrador and uses a degree-2 fit.
+        Prefer model/coefficients metadata if present; otherwise, parse points and fit poly2.
         """
         if not os.path.exists(csv_filename):
             print(f"Arquivo de calibração FSR {csv_filename} não encontrado.")
