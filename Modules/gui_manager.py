@@ -11,7 +11,7 @@ import threading
 import time
 import asyncio
 from .plot_manager import PlotManager
-from .calibration_manager import CalibrationManager
+from .legacy.calibration_manager import CalibrationManager
 from .goniometer_manager import GoniometerManager
 from .tests import Tests
 from .ble_manager import BLEManager

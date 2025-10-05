@@ -8,6 +8,7 @@ PyQt6>=6.5
 # SciPy é necessário para o ajuste racional do FSR; não há wheels para Python 3.13 em todas as plataformas ainda
 # Use Python 3.12 para instalar esta versão do SciPy com wheels pré-compilados
 scipy>=1.13; python_version<'3.13'
+pyserial>=3.5
 
 # Utilitários usados no projeto
 requests

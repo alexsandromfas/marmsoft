@@ -137,12 +137,16 @@ class DashboardPage(QWidget):
         super().__init__()
         lay = QVBoxLayout(self); lay.setSpacing(20)
         cards_row = QHBoxLayout(); cards_row.setSpacing(16)
+        self.cards_row = cards_row  # armazenar para adição dinâmica de cartões
         # Renomeado para Bluetooth
         self.card_ble = StatusCard("Bluetooth", "OFF")
         self.card_gonio = StatusCard("GONIÔMETRO", "N/D")
         self.card_calib = StatusCard("CALIBRAÇÃO", "--")
         self.card_session = StatusCard("SESSÃO", "INATIVA")
-        for c in (self.card_ble,self.card_gonio,self.card_calib,self.card_session): cards_row.addWidget(c)
+        # Cartão da célula de carga (adicionado dinamicamente se existir no MainWindow, mas criamos placeholder aqui)
+        self.card_load_cell = StatusCard("CÉLULA", "DESC")
+        for c in (self.card_ble,self.card_gonio,self.card_calib,self.card_session,self.card_load_cell):
+            cards_row.addWidget(c)
         lay.addLayout(cards_row)
         spark_row = QHBoxLayout(); spark_row.setSpacing(14)
         self.spark_flex = MiniSparkline(color="#7e57c2"); self.spark_fsr = MiniSparkline(color="#26c6da")
@@ -151,6 +155,8 @@ class DashboardPage(QWidget):
         lay.addStretch()
     def append_log(self, msg: str):
         pass
+    def add_card(self, card: QWidget):
+        self.cards_row.addWidget(card)
 
 class SensorsPage(QWidget):
     # Página de sensores com dois modos: Cartões ou Unificado.
@@ -286,6 +292,11 @@ class SensorsPage(QWidget):
         self.live_values_layout = QHBoxLayout(self.live_values_bar); self.live_values_layout.setContentsMargins(4,4,4,4); self.live_values_layout.setSpacing(12)
         self.live_value_labels: Dict[str, QLabel] = {}
         old_lay.addWidget(self.live_values_bar)
+        # Botão de Tara visível apenas em modo FSR quando load_cell habilitado
+        self.btn_unified_tare = QPushButton("Tara Célula"); self.btn_unified_tare.setProperty('class','action')
+        self.btn_unified_tare.setVisible(False)
+        self.btn_unified_tare.clicked.connect(self._unified_tare_clicked)
+        old_lay.addWidget(self.btn_unified_tare, 0, Qt.AlignmentFlag.AlignLeft)
         # Renomeado: old_plot -> unified_plot
         self.unified_plot = PlotManager(
             self.old_plot_container,
@@ -410,7 +421,10 @@ class SensorsPage(QWidget):
             if 'goniometer' in displayed:
                 wanted.add('goniometer')
         else:
+            # Em modo FSR exibe fsr e também load_cell se selecionado
             wanted = {name for name in displayed if name.startswith('fsr')}
+            if 'load_cell' in displayed:
+                wanted.add('load_cell')
         # Remover labels que não são mais desejados
         for name in list(self.live_value_labels.keys()):
             if name not in wanted:
@@ -447,9 +461,27 @@ class SensorsPage(QWidget):
                     v_str = f"{v:.2f}".replace('.', ',')
                     f_str = f"{force:.2f}".replace('.', ',')
                     lab.setText(f"{name} {v_str}v {f_str}N")
+                elif name == 'load_cell' and mode_txt == 'fsr':
+                    force = float(latest_readings.get('load_cell_force', 0.0))
+                    f_str = f"{force:.2f}".replace('.', ',')
+                    lab.setText(f"load_cell {f_str}N")
             except Exception:
                 # Evita travar UI por conversões
                 pass
+        # Controla visibilidade do botão de tara
+        self.btn_unified_tare.setVisible(mode_txt == 'fsr' and 'load_cell' in self.live_value_labels)
+
+    def _unified_tare_clicked(self):
+        # Encaminha para método global (se existir)
+        mw = self.window()
+        try:
+            if hasattr(mw, 'load_cell') and mw.load_cell:
+                mw.load_cell.tare()
+                if hasattr(mw, 'page_dev'):
+                    mw.page_dev.add_line('Tara enviada (unificado)')
+        except Exception as e:
+            if hasattr(mw, 'page_dev'):
+                mw.page_dev.add_line(f'Falha tara unificado: {e}')
 
 class MultiSensorPlot(QWidget):
     # Plot multi-sensores simples com filtragem dinâmica por conjunto habilitado.
@@ -2211,6 +2243,12 @@ class MainWindow(QMainWindow):
         self.session = None  # AppSession | None
         self.current_theme = "Dark"
         self.sidebar_collapsed = False
+        # Estado da célula de carga
+        self.load_cell = None  # será instância de LoadCellManager
+        self.load_cell_last_port = ''
+        self.load_cell_grams = 0
+        self.load_cell_newtons = 0.0
+        self.load_cell_last_ts = 0.0
 
         # Central widget & layout raiz
         central = QWidget(); self.setCentralWidget(central)
@@ -2581,6 +2619,44 @@ class MainWindow(QMainWindow):
         host_layout.addRow(self.list_ble)
         self.lbl_ble_status = QLabel("Status: Desconectado")
         host_layout.addRow(self.lbl_ble_status)
+        # --- Seção Célula de Carga (Serial) ---
+        lc_title = QLabel("Célula de Carga (Serial)")
+        lc_title.setProperty('class','section-title')
+        host_layout.addRow(lc_title)
+        lc_btn_row = QHBoxLayout()
+        self.btn_lc_scan = QPushButton("Atualizar Portas")
+        self.btn_lc_connect = QPushButton("Conectar")
+        self.btn_lc_disconnect = QPushButton("Desconectar")
+        self.btn_lc_tare = QPushButton("Tara")
+        for b in (self.btn_lc_scan,self.btn_lc_connect,self.btn_lc_disconnect,self.btn_lc_tare):
+            lc_btn_row.addWidget(b)
+        host_layout.addRow(lc_btn_row)
+        from PyQt6.QtWidgets import QListWidget as _QList2
+        self.list_lc_ports = _QList2(); self.list_lc_ports.setMaximumHeight(120)
+        host_layout.addRow(self.list_lc_ports)
+        self.lbl_lc_status = QLabel("Status: Desconectado")
+        host_layout.addRow(self.lbl_lc_status)
+        # Estados iniciais
+        self.btn_lc_connect.setEnabled(False)
+        self.btn_lc_disconnect.setEnabled(False)
+        self.btn_lc_tare.setEnabled(False)
+        # Conexões
+        self.btn_lc_scan.clicked.connect(self._lc_scan)
+        self.btn_lc_connect.clicked.connect(self._lc_connect)
+        self.btn_lc_disconnect.clicked.connect(self._lc_disconnect)
+        self.btn_lc_tare.clicked.connect(self._lc_tare)
+        def _lc_selection_changed(_row):
+            if self.list_lc_ports.count()==0:
+                self.btn_lc_connect.setEnabled(False); return
+            txt = self.list_lc_ports.currentItem().text() if self.list_lc_ports.currentItem() else ''
+            enable = bool(txt) and not txt.startswith('(Nenhuma') and not txt.startswith('Erro:')
+            if self.load_cell and getattr(self.load_cell,'connected',False):
+                enable = False  # já conectado
+            self.btn_lc_connect.setEnabled(enable)
+        self.list_lc_ports.currentRowChanged.connect(_lc_selection_changed)
+        # Primeira varredura e tentativa de auto-conexão
+        QTimer.singleShot(200, self._lc_scan)
+        QTimer.singleShot(1400, self._auto_connect_load_cell)
         # Suavização
         smooth_title = QLabel("Filtro de Suavização (alpha)")
         smooth_title.setProperty('class','section-title')
@@ -2736,6 +2812,15 @@ class MainWindow(QMainWindow):
             self.start_session()
         self.page_dashboard.card_calib.update_value("v1 (simulada)")
         self.update_goniometer_status()
+        # Atualiza cartão célula de carga
+        try:
+            if hasattr(self, 'card_load_cell') and self.card_load_cell:
+                if self.load_cell and getattr(self.load_cell, 'connected', False):
+                    self.card_load_cell.update_value(f"{self.load_cell_grams}g | {self.load_cell_newtons:.2f}N")
+                else:
+                    self.card_load_cell.update_value("DESC")
+        except Exception:
+            pass
 
     def update_goniometer_status(self):
         status = "Conectado" if (self.goniometer and getattr(self.goniometer, 'dll', None)) else "Desconectado"
@@ -2757,6 +2842,11 @@ class MainWindow(QMainWindow):
         except Exception as e:
             if hasattr(self, 'page_dev'):
                 self.page_dev.add_line(f"Falha escrevendo config: {e}")
+    # ---- helpers célula de carga ----
+    def _load_last_load_cell_port(self) -> str:
+        cfg = self._read_config(); return cfg.get('lastLoadCellPort','')
+    def _save_last_load_cell_port(self, port: str):
+        cfg = self._read_config(); cfg['lastLoadCellPort']=port; self._write_config(cfg)
     def _load_ble_service_uuid(self) -> str:
         cfg = self._read_config()
         return cfg.get('bleServiceUuid', 'abcdef01-1234-5678-1234-56789abcdef0')
@@ -2769,6 +2859,97 @@ class MainWindow(QMainWindow):
         if 'bleServiceUuid' not in cfg:
             cfg['bleServiceUuid'] = self._ble_target_uuid
         self._write_config(cfg)
+    # ---------- Métodos célula de carga (inseridos) ----------
+    def _lc_scan(self):
+        if not hasattr(self, 'list_lc_ports'): return
+        try:
+            from serial.tools import list_ports  # type: ignore
+            self.list_lc_ports.clear()
+            ports = list_ports.comports()
+            if not ports:
+                self.list_lc_ports.addItem('(Nenhuma porta)'); return
+            for p in ports:
+                desc = f"{p.device} - {p.description}" if p.description else p.device
+                self.list_lc_ports.addItem(desc)
+        except Exception as e:
+            self.list_lc_ports.clear(); self.list_lc_ports.addItem(f"Erro: {e}")
+
+    def _lc_connect(self):
+        if not hasattr(self, 'list_lc_ports'): return
+        row = self.list_lc_ports.currentRow()
+        if row < 0: return
+        txt = self.list_lc_ports.item(row).text()
+        if txt.startswith('(Nenhuma') or txt.startswith('Erro:'): return
+        port = txt.split(' ')[0]
+        try:
+            from Modules.load_cell_manager import LoadCellManager
+            if self.load_cell:
+                try: self.load_cell.stop()
+                except Exception: pass
+            self.load_cell = LoadCellManager(port=port, callback=self._on_load_cell_value)
+            self.load_cell.start()
+            if hasattr(self,'lbl_lc_status'):
+                self.lbl_lc_status.setText(f"Status: Conectando {port}...")
+            if hasattr(self,'btn_lc_connect'): self.btn_lc_connect.setEnabled(False)
+            if hasattr(self,'btn_lc_disconnect'): self.btn_lc_disconnect.setEnabled(True)
+            if hasattr(self,'btn_lc_tare'): self.btn_lc_tare.setEnabled(True)
+            self._save_last_load_cell_port(port)
+            self.page_dev.add_line(f"LoadCell conectando em {port}")
+            QTimer.singleShot(1200, self._lc_post_check)
+        except Exception as e:
+            if hasattr(self,'lbl_lc_status'):
+                self.lbl_lc_status.setText(f"Status: Erro {e}")
+
+    def _lc_post_check(self):
+        if self.load_cell and getattr(self.load_cell,'connected',False):
+            if hasattr(self,'lbl_lc_status'):
+                self.lbl_lc_status.setText(f"Status: Conectado ({self.load_cell.port})")
+        else:
+            if hasattr(self,'lbl_lc_status'):
+                self.lbl_lc_status.setText('Status: Falha conexão')
+            if hasattr(self,'btn_lc_connect'): self.btn_lc_connect.setEnabled(True)
+            if hasattr(self,'btn_lc_disconnect'): self.btn_lc_disconnect.setEnabled(False)
+            if hasattr(self,'btn_lc_tare'): self.btn_lc_tare.setEnabled(False)
+
+    def _lc_disconnect(self):
+        if self.load_cell:
+            try: self.load_cell.stop()
+            except Exception: pass
+            self.load_cell = None
+        if hasattr(self,'lbl_lc_status'):
+            self.lbl_lc_status.setText('Status: Desconectado')
+        if hasattr(self,'btn_lc_connect'): self.btn_lc_connect.setEnabled(True)
+        if hasattr(self,'btn_lc_disconnect'): self.btn_lc_disconnect.setEnabled(False)
+        if hasattr(self,'btn_lc_tare'): self.btn_lc_tare.setEnabled(False)
+        self.page_dev.add_line('LoadCell desconectada')
+
+    def _lc_tare(self):
+        if self.load_cell:
+            try:
+                self.load_cell.tare(); self.page_dev.add_line('Tara enviada à célula')
+            except Exception as e:
+                self.page_dev.add_line(f'Falha tara: {e}')
+
+    def _on_load_cell_value(self, grams: int, newtons: float, ts: float):
+        self.load_cell_grams = grams; self.load_cell_newtons = newtons; self.load_cell_last_ts = ts
+        # injeta leitura para plot no próximo ciclo
+        self.latest_readings['load_cell_force'] = newtons
+
+    def _auto_connect_load_cell(self):
+        port = self._load_last_load_cell_port()
+        if not port: return
+        try:
+            from serial.tools import list_ports  # type: ignore
+            avail = [p.device for p in list_ports.comports()]
+            if port in avail:
+                self.page_dev.add_line(f'Auto conectar célula {port}')
+                if hasattr(self,'list_lc_ports'):
+                    for i in range(self.list_lc_ports.count()):
+                        if self.list_lc_ports.item(i).text().startswith(port):
+                            self.list_lc_ports.setCurrentRow(i); break
+                self._lc_connect()
+        except Exception:
+            pass
     def _try_auto_reconnect_ble(self):
         # Status inicial consistente
         self.lbl_ble_status.setText("Status: Desconectado")

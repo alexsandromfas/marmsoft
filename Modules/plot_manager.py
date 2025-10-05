@@ -22,7 +22,7 @@ class PlotManager:
         self.time_history = deque()
         self.voltage_histories = {sid: deque() for sid in self.sensors.keys()}
         self.angle_histories = {sid: deque() for sid in self.sensors.keys() if sid.startswith('flex')}
-        self.force_histories = {sid: deque() for sid in self.sensors.keys() if sid.startswith('fsr')}
+        self.force_histories = {sid: deque() for sid in self.sensors.keys() if (sid.startswith('fsr') or sid == 'load_cell')}
         self.goniometer_history = deque()
 
         self.fig = Figure(figsize=(12, 6), dpi=100)
@@ -51,7 +51,7 @@ class PlotManager:
 
         self.voltage_lines = {sid: self.ax_voltage.plot([], [], label=f"{sid.upper()} Voltage", color=self.sensor_colors[sid])[0] for sid in self.sensors.keys()}
         self.angle_lines = {sid: self.ax_detail.plot([], [], label=sid.upper(), color=self.sensor_colors[sid])[0] for sid in self.angle_histories.keys()}
-        self.force_lines = {sid: self.ax_detail.plot([], [], label=sid.upper(), color=self.sensor_colors[sid])[0] for sid in self.force_histories.keys()}
+        self.force_lines = {sid: self.ax_detail.plot([], [], label=("LOAD CELL" if sid=='load_cell' else sid.upper()), color=self.sensor_colors[sid])[0] for sid in self.force_histories.keys()}
         self.line_goniometer_angle = self.ax_detail.plot([], [], label="GONIÔMETRO", color="black")[0]
         # Configura textos iniciais do eixo de tensão (cores definidas em apply_theme)
         self.ax_voltage.set_title("Tensão (V) x Tempo")

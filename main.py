@@ -18,6 +18,8 @@ from Modules import ui_manager  # módulo renomeado (antes ui_prototipo)
 # -------- Criação e calibração de sensores (reutilizado) --------
 sensors = {f"flex{i}": SensorData() for i in range(1,9)}
 sensors.update({f"fsr{i}": SensorData() for i in range(1,5)})
+# Adiciona sensor lógico da célula de carga (sem calibração inicial)
+sensors['load_cell'] = SensorData()
 
 for i in range(1,9):
     sensors[f"flex{i}"].load_calibration_from_file(f"calibration_flex{i}.csv")
@@ -31,6 +33,8 @@ for i in range(1,9):
 for i in range(1,5):
     latest_readings[f"fsr{i}_voltage"] = 0.0
     latest_readings[f"fsr{i}_force"] = 0.0
+# Load cell (inicializa força em N)
+latest_readings['load_cell_force'] = 0.0
 
 class _ImageSplash(QWidget):
     """Splash simples que mostra apenas uma imagem PNG com transparência.
