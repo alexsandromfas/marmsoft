@@ -51,7 +51,8 @@ class PlotManager:
 
         self.voltage_lines = {sid: self.ax_voltage.plot([], [], label=f"{sid.upper()} Voltage", color=self.sensor_colors[sid])[0] for sid in self.sensors.keys()}
         self.angle_lines = {sid: self.ax_detail.plot([], [], label=sid.upper(), color=self.sensor_colors[sid])[0] for sid in self.angle_histories.keys()}
-        self.force_lines = {sid: self.ax_detail.plot([], [], label=("LOAD CELL" if sid=='load_cell' else sid.upper()), color=self.sensor_colors[sid])[0] for sid in self.force_histories.keys()}
+        # Força: para 'load_cell' usar rótulo padronizado 'LOAD CELL'
+        self.force_lines = {sid: self.ax_detail.plot([], [], label=('LOAD CELL' if sid=='load_cell' else sid.upper()), color=self.sensor_colors[sid])[0] for sid in self.force_histories.keys()}
         self.line_goniometer_angle = self.ax_detail.plot([], [], label="GONIÔMETRO", color="black")[0]
         # Configura textos iniciais do eixo de tensão (cores definidas em apply_theme)
         self.ax_voltage.set_title("Tensão (V) x Tempo")
@@ -82,7 +83,7 @@ class PlotManager:
 
     def set_fsr_mode_labels(self):
         fg = self._fg_dark if self._theme == 'Dark' else self._fg_light
-        self.ax_detail.set_title("Força x Tempo", color=fg)
+        self.ax_detail.set_title("Força (N) x Tempo", color=fg)
         self.ax_detail.set_xlabel("Tempo (s)", color=fg)
         self.ax_detail.set_ylabel("Força (N)", color=fg)
         # Limitar força em 0..10 N conforme solicitação
@@ -166,7 +167,8 @@ class PlotManager:
             else:
                 for sid in self.force_histories.keys():
                     if sid in self.displayed_sensors and self.force_lines[sid].get_visible():
-                        handles.append(self.force_lines[sid]); labels.append(sid.upper())
+                        label = 'LOAD CELL' if sid=='load_cell' else sid.upper()
+                        handles.append(self.force_lines[sid]); labels.append(label)
             if handles:
                 # Uma única linha (todos lado a lado) e centralizado no rodapé da figura.
                 ncol = len(handles)
