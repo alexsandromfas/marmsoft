@@ -299,3 +299,9 @@ class Game:
     def quit_game(self):
         """Exit the game loop."""
         self.running = False
+        try:
+            # Encerra subsistemas do pygame para permitir reabrir o jogo depois
+            import pygame as _pg
+            _pg.quit()
+        except Exception:
+            pass

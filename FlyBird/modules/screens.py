@@ -3,7 +3,6 @@
 import pygame
 from FlyBird.modules.settings import *
 from FlyBird.modules.utils import *
-from FlyBird.modules.game import *
 
 class Screens:
     """Collection of simple UI screens used by :class:`Game`."""
