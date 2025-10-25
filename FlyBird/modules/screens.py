@@ -1,6 +1,7 @@
 """Helper screens for menu prompts and game over display."""
 
 import pygame
+import os, json
 from FlyBird.modules.settings import *
 from FlyBird.modules.utils import *
 
@@ -41,29 +42,87 @@ class Screens:
 
 
     def show_go_screen(self):
-        """Display score information and allow the player to choose an action."""
-        # Calculate score and amplitudes
+        """Display summary for this game and a Top 10 leaderboard, then allow actions."""
+
+        # Compute current session stats
         obstacles_passed = self.game.bird.obstacles_passed
-        if self.game.bird.amplitudes:
-            total_phalange1 = max(a[0] for a in self.game.bird.amplitudes) - min(a[0] for a in self.game.bird.amplitudes)
-            total_phalange2 = max(a[1] for a in self.game.bird.amplitudes) - min(a[1] for a in self.game.bird.amplitudes)
+        if (self.game.bird.obs_angle_min is not None) and (self.game.bird.obs_angle_max is not None):
+            ang_min = self.game.bird.obs_angle_min
+            ang_max = self.game.bird.obs_angle_max
+            amplitude_max = ang_max - ang_min
+        elif self.game.bird.amplitudes:
+            series = [a[0] for a in self.game.bird.amplitudes]
+            ang_min = min(series)
+            ang_max = max(series)
+            amplitude_max = ang_max - ang_min
         else:
-            total_phalange1 = total_phalange2 = 0
+            ang_min = ang_max = amplitude_max = 0.0
+        speed_max = getattr(self.game, 'max_speed_factor', 1.0)
 
-        # Game Over screen
+        # Read leaderboard from JSON (Top 10 by Obstaculos desc, then VelocidadeMax desc, then AmplitudeMax desc)
+        leaderboard = []
+        if os.path.isfile(RESULTS_JSON):
+            try:
+                with open(RESULTS_JSON, 'r', encoding='utf-8') as f:
+                    data = json.load(f) or []
+                if isinstance(data, list):
+                    for r in data:
+                        try:
+                            nome = (r.get('Nome') or '')
+                            artic = (r.get('Articulacao') or r.get('Dedo') or '')
+                            obstaculos = int(r.get('Obstaculos') or 0)
+                            velocidade = float(r.get('VelocidadeMax') or 1.0)
+                            amplitude = float(r.get('AmplitudeMax') or 0.0)
+                            leaderboard.append({
+                                'Nome': nome,
+                                'Articulacao': artic,
+                                'Obstaculos': obstaculos,
+                                'VelocidadeMax': velocidade,
+                                'AmplitudeMax': amplitude
+                            })
+                        except Exception:
+                            pass
+            except Exception:
+                leaderboard = []
+        # Order and keep only Top 10
+        leaderboard.sort(key=lambda r: (r['Obstaculos'], r['VelocidadeMax'], r['AmplitudeMax']), reverse=True)
+        leaderboard = leaderboard[:10]
+
+        # Game Over screen (layout: resumo à esquerda, top 10 à direita, botões embaixo lado a lado)
         self.screen.fill(BLACK)
-        self.game.save_results
-        font_large = pygame.font.Font(None, 72)
-        game_over_text = font_large.render("GAME OVER", True, WHITE)
-        self.screen.blit(game_over_text, (WIDTH // 2 - game_over_text.get_width() // 2, HEIGHT // 6))
+        title_font = pygame.font.Font(None, 60)
+        game_over_text = title_font.render("GAME OVER", True, WHITE)
+        self.screen.blit(game_over_text, (20, 20))
 
+        # Left pane: current game summary (smaller font, left aligned)
+        info_font = pygame.font.Font(None, 28)
         font_small = pygame.font.Font(None, 36)
-        # Display score
-        score_text = font_small.render(f"Obstáculos ultrapassados: {obstacles_passed}", True, WHITE)
-        amplitude_text = font_small.render(
-            f"Amplitude Falange 1: {total_phalange1:.2f}°   Amplitude Falange 2: {total_phalange2:.2f}°", True, WHITE)
-        self.screen.blit(score_text, (WIDTH // 2 - score_text.get_width() // 2, HEIGHT // 6 + 80))
-        self.screen.blit(amplitude_text, (WIDTH // 2 - amplitude_text.get_width() // 2, HEIGHT // 6 + 120))
+        summary_lines = [
+            f"Jogador: {self.game.player_name}",
+            f"Articulação: {self.game.selected_finger}",
+            f"Obstáculos: {obstacles_passed}",
+            f"Ângulo Máx (Flexão): {ang_max:.2f}°",
+            f"Ângulo Mín (Extensão): {ang_min:.2f}°",
+            f"Amplitude Máxima: {amplitude_max:.2f}°",
+            f"Velocidade Máxima: {speed_max:.2f}x",
+        ]
+        left_x, left_y = 20, 100
+        for i, line in enumerate(summary_lines):
+            t = info_font.render(line, True, WHITE)
+            self.screen.blit(t, (left_x, left_y + i * 24))
+
+        # Right pane: Leaderboard Top 10
+        right_margin = 20
+        right_x = WIDTH // 2 + 20
+        lb_title_font = pygame.font.Font(None, 28)
+        lb_row_font = pygame.font.Font(None, 24)
+        title_lb = lb_title_font.render("Top 10 — Recordistas (por Obstáculos)", True, WHITE)
+        self.screen.blit(title_lb, (right_x, 80))
+        y_lb = 110
+        for i, rec in enumerate(leaderboard):
+            line = f"{i+1:>2}. {rec['Nome']} — {rec['Articulacao']} — Obs: {rec['Obstaculos']}  Vel: {rec['VelocidadeMax']:.2f}x  Amp: {rec['AmplitudeMax']:.1f}°"
+            t = lb_row_font.render(line, True, WHITE)
+            self.screen.blit(t, (right_x, y_lb + i * 22))
 
         # Buttons
         buttons = []
@@ -73,10 +132,14 @@ class Screens:
         button_height = 50
         button_margin = 20
         total_height = len(button_texts) * (button_height + button_margin) - button_margin
-        start_y = HEIGHT // 2
+        # Position buttons near the bottom
+        start_y = HEIGHT - button_height - 30
 
+        # Arrange buttons side by side, centered horizontally
+        total_width = len(button_texts) * button_width + (len(button_texts) - 1) * button_margin
+        start_x = WIDTH // 2 - total_width // 2
         for i, text in enumerate(button_texts):
-            rect = pygame.Rect(WIDTH // 2 - button_width // 2, start_y + i * (button_height + button_margin), button_width, button_height)
+            rect = pygame.Rect(start_x + i * (button_width + button_margin), start_y, button_width, button_height)
             buttons.append((rect, text, button_actions[i]))
 
         waiting = True
@@ -96,9 +159,18 @@ class Screens:
 
             # Redraw the screen elements
             self.screen.fill(BLACK)
-            self.screen.blit(game_over_text, (WIDTH // 2 - game_over_text.get_width() // 2, HEIGHT // 6))
-            self.screen.blit(score_text, (WIDTH // 2 - score_text.get_width() // 2, HEIGHT // 6 + 80))
-            self.screen.blit(amplitude_text, (WIDTH // 2 - amplitude_text.get_width() // 2, HEIGHT // 6 + 120))
+            # Redraw static content
+            # Redraw static content
+            self.screen.fill(BLACK)
+            self.screen.blit(game_over_text, (20, 20))
+            for i, line in enumerate(summary_lines):
+                t = info_font.render(line, True, WHITE)
+                self.screen.blit(t, (left_x, left_y + i * 24))
+            self.screen.blit(title_lb, (right_x, 80))
+            for i, rec in enumerate(leaderboard):
+                line = f"{i+1:>2}. {rec['Nome']} — {rec['Articulacao']} — Obs: {rec['Obstaculos']}  Vel: {rec['VelocidadeMax']:.2f}x  Amp: {rec['AmplitudeMax']:.1f}°"
+                t = lb_row_font.render(line, True, WHITE)
+                self.screen.blit(t, (right_x, y_lb + i * 22))
 
             for rect, text, _ in buttons:
                 pygame.draw.rect(self.screen, WHITE, rect)
@@ -124,6 +196,12 @@ class Screens:
         next_button = pygame.Rect(WIDTH // 2 - 50, input_box.bottom + 20, 100, 40)
         next_button_text = font_small.render("Próximo", True, BLACK)
 
+        # Speed ramp checkbox
+        checkbox_label = pygame.font.Font(None, 28).render("Aumento de velocidade", True, WHITE)
+        cb_size = 22
+        cb_rect = pygame.Rect(input_box.left, input_box.bottom + 70, cb_size, cb_size)
+        cb_checked = getattr(self.game, 'speed_ramp_enabled', False)
+
         while active:
             current_time = pygame.time.get_ticks()
             if current_time - cursor_timer > cursor_interval:
@@ -140,6 +218,8 @@ class Screens:
                         if name_text.strip() != '':
                             active = False
                             self.game.player_name = name_text
+                            # store checkbox state
+                            self.game.speed_ramp_enabled = bool(cb_checked)
                             return
                     elif event.key == pygame.K_BACKSPACE:
                         name_text = name_text[:-1]
@@ -151,7 +231,11 @@ class Screens:
                         if name_text.strip() != '':
                             active = False
                             self.game.player_name = name_text
+                            self.game.speed_ramp_enabled = bool(cb_checked)
                             return
+                    # Toggle checkbox
+                    if cb_rect.collidepoint(mouse_pos):
+                        cb_checked = not cb_checked
 
             self.screen.fill(BLACK)
             self.screen.blit(name_prompt, (WIDTH // 2 - name_prompt.get_width() // 2, HEIGHT // 2 - 80))
@@ -168,6 +252,13 @@ class Screens:
             pygame.draw.rect(self.screen, WHITE, next_button)
             text_rect = next_button_text.get_rect(center=next_button.center)
             self.screen.blit(next_button_text, text_rect)
+
+            # Draw speed ramp checkbox and label
+            pygame.draw.rect(self.screen, WHITE, cb_rect, 2)
+            if cb_checked:
+                inner = cb_rect.inflate(-6, -6)
+                pygame.draw.rect(self.screen, WHITE, inner)
+            self.screen.blit(checkbox_label, (cb_rect.right + 10, cb_rect.top - 4))
 
             pygame.display.flip()
             self.clock.tick(30)

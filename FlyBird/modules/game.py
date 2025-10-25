@@ -4,6 +4,7 @@ import pygame
 import random
 import csv
 import os
+import json
 from FlyBird.modules.sprites import Bird, Wood, Cloud
 from FlyBird.modules.settings import *
 from FlyBird.modules.utils import *
@@ -38,6 +39,14 @@ class Game:
         self._next_is_bottom = bool(random.getrandbits(1))
         self._last_wood_image_idx = None  # avoid immediate image repetition
 
+        # Speed ramp control
+        self.speed_ramp_enabled = getattr(self, 'speed_ramp_enabled', False)
+        self.speed_factor = 1.0
+        self._speed_start_ms = pygame.time.get_ticks()
+        self._speed_ramp_per_sec = 0.015  # increase 1.5% per second (tunable)
+        self._speed_cap = 2.5  # do not exceed 2.5x by default
+        self.max_speed_factor = 1.0
+
         self.load_data()
         self.player_name = ""
         self.selected_finger = ""
@@ -51,6 +60,8 @@ class Game:
         """Load images and obstacle data from disk."""
         # Load images
         self.background = pygame.image.load(os.path.join(ASSETS_DIR, "Background", "background.png")).convert()
+        self._bg_scaled = None
+        self._bg_scaled_size = None
         self.cloud_images = load_images_from_folder(NUVENS_DIR)
         self.wood_images = load_images_from_folder(WOOD_DIR)
         bird_frames = load_images_from_folder(BIRD_DIR, scale_factor=BIRD_SCALE, remove_bg=True, base_color=(0, 255, 0))
@@ -165,33 +176,57 @@ class Game:
     def update(self):
         """Update sprites and check for collisions."""
         keys_pressed = pygame.key.get_pressed()
+
+        # Update speed factor smoothly over time
+        if self.speed_ramp_enabled:
+            elapsed_s = max(0.0, (pygame.time.get_ticks() - self._speed_start_ms) / 1000.0)
+            self.speed_factor = min(self._speed_cap, 1.0 + elapsed_s * self._speed_ramp_per_sec)
+        else:
+            self.speed_factor = 1.0
+        if self.speed_factor > self.max_speed_factor:
+            self.max_speed_factor = self.speed_factor
+        # Adjust bird flap animation rate with speed factor (faster flaps)
+        base_rate = BIRD_FRAME_RATE
+        min_ms = 40
+        self.bird.frame_rate = max(min_ms, int(base_rate / self.speed_factor))
         self.bird.update(keys_pressed)
         self.bird.check_invincibility()
+        # Scale cloud and wood speeds before updating
+        for cloud in self.clouds:
+            cloud.speed = cloud.base_speed * self.speed_factor
+        for wood in self.woods:
+            wood.speed = 3.0 * self.speed_factor
         self.clouds.update()
         self.woods.update()
 
         # Spawn new woods when countdown elapses; ensure final x respects last-right spacing
-        self._wood_spawn_distance -= self._wood_speed_px
+        # Spawn countdown scales with speed (more speed -> spawns sooner)
+        self._wood_spawn_distance -= (self._wood_speed_px * self.speed_factor)
         if self._wood_spawn_distance <= 0:
             last_right = max((w.rect.right for w in self.woods), default=WIDTH)
-            spacing = random.randint(380, 620)
+            # Slightly reduce spacing as speed grows to keep rhythm, but not too tight
+            base_min, base_max = 380, 620
+            shrink = int((self.speed_factor - 1.0) * 80)  # shrink up to ~120px near cap
+            spacing = random.randint(max(300, base_min - shrink), max(420, base_max - shrink))
             x = max(WIDTH + 80, last_right + spacing)
             self._spawn_wood(x_override=x)
-            self._wood_spawn_distance = random.randint(220, 360)
+            # Reset distance a bit smaller at higher speeds
+            base_min_d, base_max_d = 220, 360
+            dist_shrink = int((self.speed_factor - 1.0) * 40)
+            self._wood_spawn_distance = random.randint(max(160, base_min_d - dist_shrink), max(260, base_max_d - dist_shrink))
 
-        # Check collisions
+        # Check collisions (rect first, then mask using cached masks)
         if not self.bird.is_invincible:
-            bird_mask = pygame.mask.from_surface(self.bird.image)
+            bird_mask = self.bird.get_mask()
             for wood in self.woods:
-                wood_mask = pygame.mask.from_surface(wood.image)
-                offset = (int(wood.rect.x - self.bird.rect.x), int(wood.rect.y - self.bird.rect.y))
-                if bird_mask.overlap(wood_mask, offset):
-                    print("Collision!")
-                    self.bird.handle_collision()
-                    if self.bird.lives <= 0:
-                        print("Game Over!")
-                        print(f"Total obstacles passed: {self.bird.obstacles_passed}")
-                        self.game_over = True
+                if self.bird.rect.colliderect(wood.rect):
+                    if wood.mask is None or bird_mask is None:
+                        continue
+                    offset = (int(wood.rect.x - self.bird.rect.x), int(wood.rect.y - self.bird.rect.y))
+                    if bird_mask.overlap(wood.mask, offset):
+                        self.bird.handle_collision()
+                        if self.bird.lives <= 0:
+                            self.game_over = True
 
         # Check if bird has passed any woods
         for wood in self.woods:
@@ -203,13 +238,15 @@ class Game:
 
     def draw(self):
         """Render all game elements to the screen."""
-        # Scale background to current window size
-        w,h = self.screen.get_size()
-        if self.background.get_width() != w or self.background.get_height() != h:
-            bg = pygame.transform.smoothscale(self.background, (w,h))
-        else:
-            bg = self.background
-        self.screen.blit(bg, (0, 0))
+        # Scale background to current window size (cache the scaled surface)
+        w, h = self.screen.get_size()
+        if self._bg_scaled is None or self._bg_scaled_size != (w, h):
+            if self.background.get_width() != w or self.background.get_height() != h:
+                self._bg_scaled = pygame.transform.smoothscale(self.background, (w, h))
+            else:
+                self._bg_scaled = self.background
+            self._bg_scaled_size = (w, h)
+        self.screen.blit(self._bg_scaled, (0, 0))
         self.clouds.draw(self.screen)
         self.bird.draw(self.screen)
         self.woods.draw(self.screen)
@@ -326,6 +363,9 @@ class Game:
         self.bird.velocity = 0
         self.bird.amplitudes.clear()
         self.bird.obstacles_passed = 0
+        # Reset speed ramp tracking for a new run
+        self.max_speed_factor = 1.0
+        self._speed_start_ms = pygame.time.get_ticks()
 
         # Reload clouds
         self.clouds.empty()
@@ -346,31 +386,77 @@ class Game:
 
     
     def save_results(self):
-        """Append the player's session results to ``results.csv``."""
-        # Save player's performance to CSV
+        """Persist the player's session results to JSON (preferred) and optionally CSV."""
+        from FlyBird.modules.settings import RESULTS_JSON
+        # Ensure data folder exists
         if not os.path.exists(DATA_DIR):
             os.makedirs(DATA_DIR)
-        file_exists = os.path.isfile(RESULTS_FILE)
-        with open(RESULTS_FILE, 'a', newline='') as csvfile:
-            fieldnames = ['Nome', 'Dedo', 'Obstáculos Ultrapassados', 'Amplitude Falange 1', 'Amplitude Falange 2']
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-            if not file_exists:
-                writer.writeheader()
-            # Compute total amplitudes
+
+        # Compute observed amplitude if available from sensor
+        if (self.bird.obs_angle_min is not None) and (self.bird.obs_angle_max is not None):
+            amplitude_max = self.bird.obs_angle_max - self.bird.obs_angle_min
+            ang_min = self.bird.obs_angle_min
+            ang_max = self.bird.obs_angle_max
+        else:
             if self.bird.amplitudes:
-                total_phalange1 = max(a[0] for a in self.bird.amplitudes) - min(a[0] for a in self.bird.amplitudes)
-                total_phalange2 = max(a[1] for a in self.bird.amplitudes) - min(a[1] for a in self.bird.amplitudes)
+                series = [a[0] for a in self.bird.amplitudes]
+                ang_min = min(series)
+                ang_max = max(series)
+                amplitude_max = ang_max - ang_min
             else:
-                total_phalange1 = total_phalange2 = 0
-            writer.writerow({
-                'Nome': self.player_name,
-                'Dedo': self.selected_finger,
-                'Obstáculos Ultrapassados': self.bird.obstacles_passed,
-                'Amplitude Falange 1': f"{total_phalange1:.2f}",
-                'Amplitude Falange 2': f"{total_phalange2:.2f}"
-            })
-        # Confirmation message in terminal
-        print("Resultados Salvos!")
+                ang_min = ang_max = amplitude_max = 0.0
+
+        rec = {
+            'Nome': self.player_name or '',
+            'Articulacao': self.selected_finger or '',
+            'AnguloFlexMax': round(float(ang_max), 2) if isinstance(ang_max, (int, float)) else 0.0,
+            'AnguloExtMin': round(float(ang_min), 2) if isinstance(ang_min, (int, float)) else 0.0,
+            'AmplitudeMax': round(float(amplitude_max), 2) if isinstance(amplitude_max, (int, float)) else 0.0,
+            'Obstaculos': int(self.bird.obstacles_passed),
+            'VelocidadeMax': round(float(self.max_speed_factor), 2)
+        }
+
+        # Write to JSON (canonical source for leaderboard)
+        data = []
+        if os.path.isfile(RESULTS_JSON):
+            try:
+                with open(RESULTS_JSON, 'r', encoding='utf-8') as f:
+                    data = json.load(f) or []
+                if not isinstance(data, list):
+                    data = []
+            except Exception:
+                data = []
+        data.append(rec)
+        try:
+            with open(RESULTS_JSON, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception:
+            # As a safety net, do not crash the game if disk write fails
+            pass
+
+        # Optional: still append CSV for legacy reference (not used for leaderboard anymore)
+        try:
+            file_exists = os.path.isfile(RESULTS_FILE)
+            with open(RESULTS_FILE, 'a', newline='', encoding='utf-8') as csvfile:
+                fieldnames = [
+                    'Nome','Articulacao','AnguloFlexMax','AnguloExtMin','AmplitudeMax','Obstaculos','VelocidadeMax'
+                ]
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                if not file_exists or os.path.getsize(RESULTS_FILE) == 0:
+                    writer.writeheader()
+                writer.writerow({
+                    'Nome': rec['Nome'],
+                    'Articulacao': rec['Articulacao'],
+                    'AnguloFlexMax': f"{rec['AnguloFlexMax']:.2f}",
+                    'AnguloExtMin': f"{rec['AnguloExtMin']:.2f}",
+                    'AmplitudeMax': f"{rec['AmplitudeMax']:.2f}",
+                    'Obstaculos': rec['Obstaculos'],
+                    'VelocidadeMax': f"{rec['VelocidadeMax']:.2f}"
+                })
+        except Exception:
+            pass
+
+        print("Resultados salvos (JSON).")
 
     def play_again(self):
         """Start a new game using the same player."""

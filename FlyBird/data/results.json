@@ -1,0 +1,38 @@
+[
+  {
+    "Nome": "marie",
+    "Articulacao": "Interfalângica Polegar",
+    "AnguloFlexMax": 255.21,
+    "AnguloExtMin": 190.7,
+    "AmplitudeMax": 64.51,
+    "Obstaculos": 3,
+    "VelocidadeMax": 1.23
+  },
+  {
+    "Nome": "marie",
+    "Articulacao": "Interfalângica Polegar",
+    "AnguloFlexMax": 255.21,
+    "AnguloExtMin": 190.7,
+    "AmplitudeMax": 64.51,
+    "Obstaculos": 6,
+    "VelocidadeMax": 1.35
+  },
+  {
+    "Nome": "alex",
+    "Articulacao": "Interfalângica Polegar",
+    "AnguloFlexMax": 255.21,
+    "AnguloExtMin": 190.7,
+    "AmplitudeMax": 64.51,
+    "Obstaculos": 1,
+    "VelocidadeMax": 1.14
+  },
+  {
+    "Nome": "alex",
+    "Articulacao": "Interfalângica Polegar",
+    "AnguloFlexMax": 255.92,
+    "AnguloExtMin": 190.7,
+    "AmplitudeMax": 65.22,
+    "Obstaculos": 14,
+    "VelocidadeMax": 1.61
+  }
+]

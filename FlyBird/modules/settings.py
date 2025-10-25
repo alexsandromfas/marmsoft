@@ -18,6 +18,7 @@ BIRD_DIR = os.path.join(ASSETS_DIR, "Bird")
 WOOD_DIR = os.path.join(ASSETS_DIR, "Woods")
 DATA_DIR = os.path.join(BASE_DIR, "data")
 RESULTS_FILE = os.path.join(DATA_DIR, "results.csv")
+RESULTS_JSON = os.path.join(DATA_DIR, "results.json")
 
 # Bird settings
 BIRD_SCALE = 0.15  # Scale to reduce bird size

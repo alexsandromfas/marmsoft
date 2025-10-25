@@ -20,6 +20,8 @@ class Bird(pygame.sprite.Sprite):
         """
         super().__init__()
         self.frames = frames
+        # Precompute masks for each animation frame (avoid per-frame mask builds)
+        self._frame_masks = [pygame.mask.from_surface(frm) for frm in self.frames]
         self.index = 0
         self.image = self.frames[self.index]
         self.rect = self.image.get_rect()
@@ -41,10 +43,21 @@ class Bird(pygame.sprite.Sprite):
         self.calib_ext_min = None  # menor ângulo (topo)
         self.calib_flex_max = None  # maior ângulo (base)
 
+        # Observed angles during gameplay (when sensor is available)
+        self.obs_angle_min = None
+        self.obs_angle_max = None
+
         # Simulate amplitudes based on bird's initial vertical position
         position_ratio = self.rect.y / (HEIGHT - self.image.get_height())
         angle = position_ratio * (FLEX_SENSOR_MAX - FLEX_SENSOR_MIN) + FLEX_SENSOR_MIN
         self.amplitudes.append((angle, angle))
+
+    def get_mask(self):
+        """Return the cached mask for the current frame."""
+        try:
+            return self._frame_masks[self.index]
+        except Exception:
+            return pygame.mask.from_surface(self.image)
     def update(self, keys_pressed):
         """Update the bird position and animation."""
         current_time = pygame.time.get_ticks()
@@ -58,6 +71,12 @@ class Bird(pygame.sprite.Sprite):
             current_angle = self.sensor_data_provider()
             if current_angle is None:
                 current_angle = SENSOR_ANGLE_MIN  # fallback
+            else:
+                # Track observed min/max angles
+                if (self.obs_angle_min is None) or (current_angle < self.obs_angle_min):
+                    self.obs_angle_min = current_angle
+                if (self.obs_angle_max is None) or (current_angle > self.obs_angle_max):
+                    self.obs_angle_max = current_angle
 
             # Use calibrated limits if available; otherwise fallback to global sensor range
             ext_min = self.calib_ext_min if self.calib_ext_min is not None else SENSOR_ANGLE_MIN
@@ -180,7 +199,6 @@ class Bird(pygame.sprite.Sprite):
     def pass_obstacle(self):
         """Increment the obstacle counter."""
         self.obstacles_passed += 1
-        print(f"Obstacle passed! Total obstacles passed: {self.obstacles_passed}")
 
 # class Wood(pygame.sprite.Sprite):
 #     def __init__(self, image, x, y, bottom):
@@ -205,13 +223,23 @@ class Wood(pygame.sprite.Sprite):
         super().__init__()
         self.image = image
         self.rect = self.image.get_rect()
-        self.rect.topleft = (x, y)  # Posição diretamente do CSV
+        self.rect.topleft = (x, y)
         self.initial_x = x  # Armazena a posição inicial para referência
         self.passed = False  # Para saber se o jogador já passou pelo tronco
+        # Speed control with subpixel precision
+        self.speed = 3.0
+        self._pos_x = float(self.rect.x)
+        # Cache mask once (image is static for this wood)
+        try:
+            self.mask = pygame.mask.from_surface(self.image)
+        except Exception:
+            self.mask = None
 
     def update(self):
         """Move the wood to the left and remove when off screen."""
-        self.rect.x -= 3  # Velocidade fixa para mover à esquerda
+        # Move using current speed (can be adjusted by Game)
+        self._pos_x -= float(self.speed)
+        self.rect.x = int(self._pos_x)
         if self.rect.right < 0:  # Saiu da tela
             self.kill()  # Remove o sprite da lista de ativos (não reseta mais)
 
@@ -229,13 +257,17 @@ class Cloud(pygame.sprite.Sprite):
         self.image = image
         self.rect = self.image.get_rect()
         self.rect.topleft = (x, y)
-        self.speed = speed
+        self.base_speed = float(speed)
+        self.speed = float(speed)
+        self._pos_x = float(self.rect.x)
 
     def update(self):
         """Move the cloud across the screen."""
-        self.rect.x -= self.speed
+        self._pos_x -= float(self.speed)
+        self.rect.x = int(self._pos_x)
         if self.rect.right < 0:
             self.rect.left = WIDTH
+            self._pos_x = float(self.rect.x)
 
     def draw(self, screen):
         """Draw the cloud on ``screen``."""
