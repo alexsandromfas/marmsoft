@@ -1856,36 +1856,57 @@ class GameCanvas(QWidget):
         self.update()
 
 class GamesPage(QWidget):
-    def __init__(self, launch_flybird: Callable[[],None]):
+    def __init__(self, launch_flybird: Callable[[],None], launch_car_racing: Callable[[],None]):
         super().__init__()
         lay = QVBoxLayout(self); lay.setSpacing(16)
         title = QLabel("Jogos"); title.setProperty('class','section-title')
         lay.addWidget(title)
-        # Grade simples de jogos (apenas FlyBird por enquanto)
+        # Grade de jogos (FlyBird + Car Racing)
         grid = QGridLayout(); grid.setSpacing(18)
         from PyQt6.QtWidgets import QToolButton
-        # Monta tile com ícone e rótulo abaixo
-        tile = QFrame(); tile.setObjectName('GameTile')
-        tl = QVBoxLayout(tile); tl.setContentsMargins(12,12,12,12); tl.setSpacing(8); tl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        btn_icon = QToolButton(); btn_icon.setAutoRaise(True); btn_icon.setCursor(Qt.CursorShape.PointingHandCursor)
-        # Carrega ícone do jogo
+
+        # --- Tile FlyBird ---
+        tile_fb = QFrame(); tile_fb.setObjectName('GameTile')
+        tl_fb = QVBoxLayout(tile_fb); tl_fb.setContentsMargins(12,12,12,12); tl_fb.setSpacing(8); tl_fb.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        btn_fb = QToolButton(); btn_fb.setAutoRaise(True); btn_fb.setCursor(Qt.CursorShape.PointingHandCursor)
         try:
             repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-            icon_path = os.path.join(repo_root, 'FlyBird','assets','icon','icon_flybird.png')
-            if os.path.isfile(icon_path):
-                btn_icon.setIcon(QIcon(icon_path))
-                btn_icon.setIconSize(QSize(160,160))
+            icon_fb = os.path.join(repo_root, 'FlyBird','assets','icon','icon_flybird.png')
+            if os.path.isfile(icon_fb):
+                btn_fb.setIcon(QIcon(icon_fb))
+                btn_fb.setIconSize(QSize(160,160))
         except Exception:
             pass
-        btn_icon.clicked.connect(launch_flybird)
-        lbl = QLabel('FlyBird'); lbl.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        tl.addWidget(btn_icon, 0, Qt.AlignmentFlag.AlignHCenter)
-        tl.addWidget(lbl, 0, Qt.AlignmentFlag.AlignHCenter)
-        # Deixa o tile clicável também
-        def _tile_mousePressEvent(_e):
+        btn_fb.clicked.connect(launch_flybird)
+        lbl_fb = QLabel('FlyBird'); lbl_fb.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        tl_fb.addWidget(btn_fb, 0, Qt.AlignmentFlag.AlignHCenter)
+        tl_fb.addWidget(lbl_fb, 0, Qt.AlignmentFlag.AlignHCenter)
+        def _tile_fb_click(_e):
             launch_flybird()
-        tile.mousePressEvent = _tile_mousePressEvent  # type: ignore
-        grid.addWidget(tile, 0, 0)
+        tile_fb.mousePressEvent = _tile_fb_click  # type: ignore
+        grid.addWidget(tile_fb, 0, 0)
+
+        # --- Tile Car Racing 2D ---
+        tile_cr = QFrame(); tile_cr.setObjectName('GameTile')
+        tl_cr = QVBoxLayout(tile_cr); tl_cr.setContentsMargins(12,12,12,12); tl_cr.setSpacing(8); tl_cr.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        btn_cr = QToolButton(); btn_cr.setAutoRaise(True); btn_cr.setCursor(Qt.CursorShape.PointingHandCursor)
+        try:
+            repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+            icon_cr = os.path.join(repo_root, 'Car Racing 2d','icon.png')
+            if os.path.isfile(icon_cr):
+                btn_cr.setIcon(QIcon(icon_cr))
+                btn_cr.setIconSize(QSize(160,160))
+        except Exception:
+            pass
+        btn_cr.clicked.connect(launch_car_racing)
+        lbl_cr = QLabel('Car Racing'); lbl_cr.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        tl_cr.addWidget(btn_cr, 0, Qt.AlignmentFlag.AlignHCenter)
+        tl_cr.addWidget(lbl_cr, 0, Qt.AlignmentFlag.AlignHCenter)
+        def _tile_cr_click(_e):
+            launch_car_racing()
+        tile_cr.mousePressEvent = _tile_cr_click  # type: ignore
+        grid.addWidget(tile_cr, 0, 1)
+
         lay.addLayout(grid)
         lay.addStretch(1)
 
@@ -2234,7 +2255,7 @@ class MainWindow(QMainWindow):
         self.page_sensors = SensorsPage(self.sensors)
         self.page_calib = CalibrationPage(self.sensors, self.sensor_backend, self.latest_readings, lambda: self.current_theme)
         self.page_tests = TestsPage()
-        self.page_games = GamesPage(self._launch_flybird)
+        self.page_games = GamesPage(self._launch_flybird, self._launch_car_racing)
         self.page_history = HistoryPage()
         self.page_settings = SettingsPage(self.change_theme)
         # Extensões dinâmicas (BLE + filtro) após construção da page_settings
@@ -2278,6 +2299,32 @@ class MainWindow(QMainWindow):
             self.page_dev.add_line("FlyBird iniciado")
         except Exception as e:
             self.page_dev.add_line(f"Erro ao iniciar FlyBird: {e}")
+
+    def _launch_car_racing(self):
+        try:
+            from threading import Thread
+            def run_game():
+                import os, sys, importlib
+                base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                game_dir = os.path.join(base_dir, 'Car Racing 2d')
+                prev_cwd = os.getcwd()
+                try:
+                    os.chdir(game_dir)
+                    if game_dir not in sys.path:
+                        sys.path.insert(0, game_dir)
+                    # Import and run game (main.py executes on import)
+                    if 'main' in sys.modules:
+                        del sys.modules['main']
+                    import main  # noqa: F401
+                except Exception as e:
+                    # Log but avoid crashing UI
+                    print('Erro Car Racing:', e)
+                finally:
+                    os.chdir(prev_cwd)
+            Thread(target=run_game, daemon=True).start()
+            self.page_dev.add_line("Car Racing iniciado")
+        except Exception as e:
+            self.page_dev.add_line(f"Erro ao iniciar Car Racing: {e}")
 
     def _post_setup(self):
         # Seleciona página inicial
