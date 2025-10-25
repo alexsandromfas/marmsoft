@@ -44,7 +44,6 @@ class Game:
         self.speed_factor = 1.0
         self._speed_start_ms = pygame.time.get_ticks()
         self._speed_ramp_per_sec = 0.015  # increase 1.5% per second (tunable)
-        self._speed_cap = 2.5  # do not exceed 2.5x by default
         self.max_speed_factor = 1.0
 
         self.load_data()
@@ -180,7 +179,8 @@ class Game:
         # Update speed factor smoothly over time
         if self.speed_ramp_enabled:
             elapsed_s = max(0.0, (pygame.time.get_ticks() - self._speed_start_ms) / 1000.0)
-            self.speed_factor = min(self._speed_cap, 1.0 + elapsed_s * self._speed_ramp_per_sec)
+            # Uncapped ramp: grows linearly with time
+            self.speed_factor = 1.0 + elapsed_s * self._speed_ramp_per_sec
         else:
             self.speed_factor = 1.0
         if self.speed_factor > self.max_speed_factor:

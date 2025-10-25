@@ -349,5 +349,68 @@
     "AmplitudeMax": 62.95,
     "Obstaculos": 14,
     "VelocidadeMax": 1.64
+  },
+  {
+    "Nome": "ALex",
+    "Articulacao": "Proximal Indicador",
+    "AnguloFlexMax": 253.8,
+    "AnguloExtMin": 192.57,
+    "AmplitudeMax": 61.23,
+    "Obstaculos": 113,
+    "VelocidadeMax": 3.49
+  },
+  {
+    "Nome": "Julia Kita",
+    "Articulacao": "Proximal Indicador",
+    "AnguloFlexMax": 253.99,
+    "AnguloExtMin": 192.57,
+    "AmplitudeMax": 61.42,
+    "Obstaculos": 44,
+    "VelocidadeMax": 2.41
+  },
+  {
+    "Nome": "Gabriela Azevedo",
+    "Articulacao": "Proximal Indicador",
+    "AnguloFlexMax": 257.48,
+    "AnguloExtMin": 192.57,
+    "AmplitudeMax": 64.91,
+    "Obstaculos": 28,
+    "VelocidadeMax": 2.06
+  },
+  {
+    "Nome": "Lara Barroso",
+    "Articulacao": "Proximal Indicador",
+    "AnguloFlexMax": 242.98,
+    "AnguloExtMin": 197.21,
+    "AmplitudeMax": 45.77,
+    "Obstaculos": 40,
+    "VelocidadeMax": 2.3
+  },
+  {
+    "Nome": "AlexM",
+    "Articulacao": "Proximal Indicador",
+    "AnguloFlexMax": 255.99,
+    "AnguloExtMin": 193.16,
+    "AmplitudeMax": 62.82,
+    "Obstaculos": 6,
+    "VelocidadeMax": 1.35
+  },
+  {
+    "Nome": "Mariana Açano",
+    "Articulacao": "Proximal Indicador",
+    "AnguloFlexMax": 257.93,
+    "AnguloExtMin": 193.16,
+    "AmplitudeMax": 64.76,
+    "Obstaculos": 70,
+    "VelocidadeMax": 2.89
+  },
+  {
+    "Nome": "Benicio Leite",
+    "Articulacao": "Proximal Indicador",
+    "AnguloFlexMax": 257.93,
+    "AnguloExtMin": 193.16,
+    "AmplitudeMax": 64.76,
+    "Obstaculos": 68,
+    "VelocidadeMax": 2.83
   }
 ]
