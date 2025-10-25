@@ -365,3 +365,91 @@ class Screens:
             pygame.display.flip()
             self.clock.tick(60)
 
+
+    def calibrate_range(self):
+        """Pre-game calibration screen to capture flexion/extension angle limits.
+
+        - Limite Extensão (menor ângulo) mapeia para o topo da tela.
+        - Limite Flexão (maior ângulo) mapeia para a base da tela.
+        """
+        font_title = pygame.font.Font(None, 48)
+        font_small = pygame.font.Font(None, 32)
+        title = font_title.render("Calibração de Limites", True, WHITE)
+        info1 = font_small.render("Defina os limites com o sensor em tempo real:", True, WHITE)
+        info2 = font_small.render("- Extensão: menor ângulo (Topo)", True, WHITE)
+        info3 = font_small.render("- Flexão: maior ângulo (Base)", True, WHITE)
+
+        # Buttons
+        BTN_W, BTN_H = 240, 50
+        margin = 24
+        ext_btn = pygame.Rect(margin, HEIGHT//2 - BTN_H - 10, BTN_W, BTN_H)
+        flex_btn = pygame.Rect(margin, HEIGHT//2 + 10, BTN_W, BTN_H)
+        proceed_btn = pygame.Rect(WIDTH - margin - BTN_W, HEIGHT - margin - BTN_H, BTN_W, BTN_H)
+
+        ext_value = None
+        flex_value = None
+
+        running = True
+        while running:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    self.game.running = False
+                    return
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    mx, my = event.pos
+                    if ext_btn.collidepoint((mx, my)):
+                        val = self.game.sensor_data_provider() if self.game.sensor_data_provider else None
+                        if val is not None:
+                            ext_value = val
+                    elif flex_btn.collidepoint((mx, my)):
+                        val = self.game.sensor_data_provider() if self.game.sensor_data_provider else None
+                        if val is not None:
+                            flex_value = val
+                    elif proceed_btn.collidepoint((mx, my)) and (ext_value is not None) and (flex_value is not None):
+                        # Normalize order: ensure ext <= flex
+                        if flex_value < ext_value:
+                            ext_value, flex_value = flex_value, ext_value
+                        # Persist to game and bird
+                        self.game.calib_ext_min = ext_value
+                        self.game.calib_flex_max = flex_value
+                        if hasattr(self.game, 'bird') and self.game.bird is not None:
+                            self.game.bird.calib_ext_min = ext_value
+                            self.game.bird.calib_flex_max = flex_value
+                        return
+
+            # Draw screen
+            self.screen.fill(BLACK)
+            # Title
+            self.screen.blit(title, (margin, margin))
+            self.screen.blit(info1, (margin, margin + title.get_height() + 8))
+            self.screen.blit(info2, (margin, margin + title.get_height() + 8 + info1.get_height() + 4))
+            self.screen.blit(info3, (margin, margin + title.get_height() + 8 + info1.get_height() + 4 + info2.get_height() + 2))
+
+            # Live angle reading
+            current_val = self.game.sensor_data_provider() if self.game.sensor_data_provider else None
+            angle_text = font_small.render(f"Ângulo atual: {current_val:.2f}°" if isinstance(current_val, (int,float)) else "Ângulo atual: --", True, WHITE)
+            self.screen.blit(angle_text, (margin, HEIGHT//2 - BTN_H - 60))
+
+            # Buttons
+            pygame.draw.rect(self.screen, (200,200,200), ext_btn)
+            self.screen.blit(font_small.render("Marcar Limite Extensão", True, BLACK), font_small.render("Marcar Limite Extensão", True, BLACK).get_rect(center=ext_btn.center))
+
+            pygame.draw.rect(self.screen, (200,200,200), flex_btn)
+            self.screen.blit(font_small.render("Marcar Limite Flexão", True, BLACK), font_small.render("Marcar Limite Flexão", True, BLACK).get_rect(center=flex_btn.center))
+
+            # Show captured values
+            ext_val_text = font_small.render(f"Extensão: {ext_value:.2f}°" if isinstance(ext_value, (int,float)) else "Extensão: --", True, WHITE)
+            flex_val_text = font_small.render(f"Flexão: {flex_value:.2f}°" if isinstance(flex_value, (int,float)) else "Flexão: --", True, WHITE)
+            self.screen.blit(ext_val_text, (ext_btn.right + 20, ext_btn.centery - ext_val_text.get_height()//2))
+            self.screen.blit(flex_val_text, (flex_btn.right + 20, flex_btn.centery - flex_val_text.get_height()//2))
+
+            # Proceed button (enabled only after both captured)
+            enabled = (ext_value is not None) and (flex_value is not None)
+            btn_col = (200,200,200) if enabled else (120,120,120)
+            txt_col = BLACK if enabled else (60,60,60)
+            pygame.draw.rect(self.screen, btn_col, proceed_btn)
+            self.screen.blit(font_small.render("Prosseguir", True, txt_col), font_small.render("Prosseguir", True, txt_col).get_rect(center=proceed_btn.center))
+
+            pygame.display.flip()
+            self.clock.tick(60)
+

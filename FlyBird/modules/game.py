@@ -29,7 +29,16 @@ class Game:
         self.game_over = False
         self.font = pygame.font.Font(None, 36)
         self.sensor_data_provider = sensor_data_provider  # Mova esta linha antes de load_data()
-        self.load_data() 
+        # Calibration values (set via calibration screen)
+        self.calib_ext_min = None
+        self.calib_flex_max = None
+        # Infinite obstacle spawning control (must be set before load_data pre-seed)
+        self._wood_spawn_distance = random.randint(280, 420)
+        self._wood_speed_px = 3  # must match Wood.update speed
+        self._next_is_bottom = bool(random.getrandbits(1))
+        self._last_wood_image_idx = None  # avoid immediate image repetition
+
+        self.load_data()
         self.player_name = ""
         self.selected_finger = ""
         self.screens = Screens(self)
@@ -48,19 +57,89 @@ class Game:
         self.bird = Bird(bird_frames)
         self.bird = Bird(bird_frames, sensor_data_provider=self.sensor_data_provider)
 
-
-        # Load obstacles from CSV
+        # Woods group (infinite spawning, not from CSV anymore)
         self.woods = pygame.sprite.Group()
-        obstacles = load_obstacles_from_csv()
-        for obstacle_data in obstacles:
-            wood = Wood(obstacle_data["image"], obstacle_data["x"], obstacle_data["y"], obstacle_data["bottom"])
-            self.woods.add(wood)
 
         # Generate initial clouds
         self.clouds = pygame.sprite.Group()
         for cloud_data in generate_clouds(self.cloud_images):
             cloud = Cloud(cloud_data["image"], cloud_data["x"], cloud_data["y"], cloud_data["speed"])
             self.clouds.add(cloud)
+
+        # Pre-seed a few woods off-screen to the right with generous spacing
+        last_right = WIDTH
+        for _ in range(3):
+            spacing = random.randint(480, 700)
+            x = max(WIDTH + 80, last_right + spacing)
+            self._spawn_wood(x_override=x)
+            # Update last_right using the spawned wood's width (approximate)
+            last_right = x + 200
+
+    def _spawn_wood(self, x_override: int | None = None):
+        """Spawn one wood obstacle, alternating top/bottom, with difficulty-safe scale and spacing."""
+        if not self.wood_images:
+            return
+        # Choose image avoiding immediate repetition when possible
+        if len(self.wood_images) > 1:
+            idx = random.randrange(len(self.wood_images))
+            if self._last_wood_image_idx is not None and idx == self._last_wood_image_idx:
+                idx = (idx + 1) % len(self.wood_images)
+            self._last_wood_image_idx = idx
+            base_img = self.wood_images[idx]
+        else:
+            base_img = self.wood_images[0]
+        # Vary scale to alter difficulty but keep passable gap
+        scale = random.uniform(0.35, 0.6)
+        img = pygame.transform.scale(
+            base_img,
+            (int(base_img.get_width() * scale), int(base_img.get_height() * scale))
+        )
+        # Orientation alternating: bottom, then top, etc.
+        bottom = self._next_is_bottom
+        self._next_is_bottom = not self._next_is_bottom
+
+        # Difficulty factor d in [0,1]: higher means harder (more of the trunk visible inside screen)
+        # Bias some obstacles to be almost fully visible (harder)
+        if random.random() < 0.35:
+            d = random.uniform(0.85, 1.0)
+        else:
+            d = random.uniform(0.45, 0.95)
+        # Visible penetration inside the screen, clamp to reasonable bounds
+        min_pen = 60
+        min_free_space = 150  # ensure at least this much free screen area
+        max_pen = min( HEIGHT - min_free_space, img.get_height() - 20 )
+        if max_pen < min_pen:
+            max_pen = min_pen
+        penetration = int(min_pen + d * (max_pen - min_pen))
+
+        # Ensure passable free space by capping trunk height proportionally
+        max_allowed_h = max(50, HEIGHT - min_free_space)
+        if img.get_height() > max_allowed_h:
+            new_h = max_allowed_h
+            new_w = int(img.get_width() * (new_h / img.get_height()))
+            img = pygame.transform.smoothscale(img, (new_w, new_h))
+            # adjust penetration within new bounds
+            max_pen = min( HEIGHT - min_free_space, img.get_height() - 20 )
+            penetration = min(max(penetration, min_pen), max_pen)
+
+        # Compute y so the trunk is partially outside the screen
+        if bottom:
+            # visible portion from bottom = penetration; so y = HEIGHT - penetration
+            y = HEIGHT - penetration
+        else:
+            # top trunk: flip and position so only 'penetration' pixels are visible
+            img = pygame.transform.flip(img, False, True)
+            y = - (img.get_height() - penetration)
+
+        # Compute x based on last rightmost obstacle to prevent overlap and closeness
+        if x_override is not None:
+            x = x_override
+        else:
+            last_right = max((w.rect.right for w in self.woods), default=WIDTH)
+            spacing = random.randint(360, 600)
+            x = max(WIDTH + 80, last_right + spacing)
+        wood = Wood(img, x, y, bottom)
+        self.woods.add(wood)
 
 
     def new(self):
@@ -90,6 +169,15 @@ class Game:
         self.bird.check_invincibility()
         self.clouds.update()
         self.woods.update()
+
+        # Spawn new woods when countdown elapses; ensure final x respects last-right spacing
+        self._wood_spawn_distance -= self._wood_speed_px
+        if self._wood_spawn_distance <= 0:
+            last_right = max((w.rect.right for w in self.woods), default=WIDTH)
+            spacing = random.randint(380, 620)
+            x = max(WIDTH + 80, last_right + spacing)
+            self._spawn_wood(x_override=x)
+            self._wood_spawn_distance = random.randint(220, 360)
 
         # Check collisions
         if not self.bird.is_invincible:
@@ -245,12 +333,16 @@ class Game:
             cloud = Cloud(cloud_data["image"], cloud_data["x"], cloud_data["y"], cloud_data["speed"])
             self.clouds.add(cloud)
 
-        # Reload woods from CSV
+        # Reset woods and re-seed a few to the right
         self.woods.empty()
-        obstacles = load_obstacles_from_csv()
-        for obstacle_data in obstacles:
-            wood = Wood(obstacle_data["image"], obstacle_data["x"], obstacle_data["y"], obstacle_data["bottom"])
-            self.woods.add(wood)
+        self._wood_spawn_distance = random.randint(220, 360)
+        self._next_is_bottom = bool(random.getrandbits(1))
+        last_right = WIDTH
+        for _ in range(3):
+            spacing = random.randint(380, 560)
+            x = max(WIDTH + 80, last_right + spacing)
+            self._spawn_wood(x_override=x)
+            last_right = x + 200
 
     
     def save_results(self):
@@ -296,6 +388,9 @@ class Game:
         self.screens.get_player_name()
         if self.running:
             self.screens.get_finger_choice()
+        if self.running:
+            # Calibrate again for the new patient
+            self.screens.calibrate_range()
         if self.running:
             self.game_over = False  # Ensure game_over is reset
 

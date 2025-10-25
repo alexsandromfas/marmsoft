@@ -37,7 +37,11 @@ class Bird(pygame.sprite.Sprite):
         self.obstacles_passed = 0  # New attribute to track obstacles passed
         self.sensor_data_provider = sensor_data_provider
 
-        # Simulate amplitudes based on bird's vertical position
+        # Calibration limits (extension = lower angle -> top; flexion = higher angle -> bottom)
+        self.calib_ext_min = None  # menor ângulo (topo)
+        self.calib_flex_max = None  # maior ângulo (base)
+
+        # Simulate amplitudes based on bird's initial vertical position
         position_ratio = self.rect.y / (HEIGHT - self.image.get_height())
         angle = position_ratio * (FLEX_SENSOR_MAX - FLEX_SENSOR_MIN) + FLEX_SENSOR_MIN
         self.amplitudes.append((angle, angle))
@@ -52,27 +56,29 @@ class Bird(pygame.sprite.Sprite):
         # Update amplitudes (simulate or use actual sensor data)
         if self.sensor_data_provider is not None:
             current_angle = self.sensor_data_provider()
-            # Ajuste para lidar com valores None
             if current_angle is None:
-                current_angle = SENSOR_ANGLE_MIN  # Ou algum valor padrão
-            # Mapear o ângulo do sensor para a posição vertical na tela
-            # position_ratio = (current_angle - SENSOR_ANGLE_MIN) / (SENSOR_ANGLE_MAX - SENSOR_ANGLE_MIN)
-            # position_ratio = max(0, min(1, position_ratio))  # Garantir que esteja entre 0 e 1
+                current_angle = SENSOR_ANGLE_MIN  # fallback
 
-            # position_ratio = (current_angle - SENSOR_ANGLE_MIN) / (SENSOR_ANGLE_MAX - SENSOR_ANGLE_MIN)
-            # position_ratio = 1 - position_ratio  # Inverter para que o ângulo mínimo seja o topo
-            
-            position_ratio = (SENSOR_ANGLE_MAX - current_angle) / (SENSOR_ANGLE_MAX - SENSOR_ANGLE_MIN)
-            position_ratio = max(0, min(1, position_ratio))  # Garantir que esteja entre 0 e 1
+            # Use calibrated limits if available; otherwise fallback to global sensor range
+            ext_min = self.calib_ext_min if self.calib_ext_min is not None else SENSOR_ANGLE_MIN
+            flex_max = self.calib_flex_max if self.calib_flex_max is not None else SENSOR_ANGLE_MAX
 
-            target_y = position_ratio * (800 - self.image.get_height())
+            # Avoid division by zero
+            if flex_max == ext_min:
+                position_ratio = 0.5
+            else:
+                # Map: extension (lower angle) -> top (0), flexion (higher) -> bottom (1)
+                position_ratio = (current_angle - ext_min) / (flex_max - ext_min)
+                position_ratio = max(0.0, min(1.0, position_ratio))
 
-            # Mover suavemente em direção ao target_y
-            smoothing_factor = 0.1  # Ajuste este valor conforme necessário (entre 0 e 1)
+            target_y = position_ratio * (HEIGHT - self.image.get_height())
+
+            # Smooth movement towards target_y
+            smoothing_factor = 0.1  # 0..1
             self.rect.y += (target_y - self.rect.y) * smoothing_factor
 
-            # Garantir que o pássaro permaneça dentro dos limites da tela
-            self.rect.y = max(-10, min(self.rect.y, 800 - self.image.get_height()))
+            # Keep within bounds
+            self.rect.y = max(-10, min(self.rect.y, HEIGHT - self.image.get_height()))
         else:
             # Controle via teclado (caso o sensor não esteja disponível)
             if keys_pressed[pygame.K_UP]:

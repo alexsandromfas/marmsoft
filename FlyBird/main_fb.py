@@ -14,6 +14,10 @@ def main_fb(sensor_data_provider=None):
         game.screens.get_finger_choice()
         if not game.running:
             break
+        # Pre-game calibration of flexion/extension limits
+        game.screens.calibrate_range()
+        if not game.running:
+            break
 
         while game.running:
             game.new()
