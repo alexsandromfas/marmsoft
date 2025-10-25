@@ -34,5 +34,320 @@
     "AmplitudeMax": 65.22,
     "Obstaculos": 14,
     "VelocidadeMax": 1.61
+  },
+  {
+    "Nome": "Alex S",
+    "Articulacao": "Interfalângica Polegar",
+    "AnguloFlexMax": 253.97,
+    "AnguloExtMin": 205.59,
+    "AmplitudeMax": 48.38,
+    "Obstaculos": 27,
+    "VelocidadeMax": 2.07
+  },
+  {
+    "Nome": "Alex MAr",
+    "Articulacao": "Interfalângica Polegar",
+    "AnguloFlexMax": 252.48,
+    "AnguloExtMin": 209.39,
+    "AmplitudeMax": 43.1,
+    "Obstaculos": 13,
+    "VelocidadeMax": 1.64
+  },
+  {
+    "Nome": "Alex Ferre",
+    "Articulacao": "Proximal Indicador",
+    "AnguloFlexMax": 258.23,
+    "AnguloExtMin": 201.55,
+    "AmplitudeMax": 56.68,
+    "Obstaculos": 20,
+    "VelocidadeMax": 1.83
+  },
+  {
+    "Nome": "Alex Fer1",
+    "Articulacao": "Proximal Indicador",
+    "AnguloFlexMax": 258.99,
+    "AnguloExtMin": 200.16,
+    "AmplitudeMax": 58.83,
+    "Obstaculos": 13,
+    "VelocidadeMax": 1.63
+  },
+  {
+    "Nome": "Alex Fer1",
+    "Articulacao": "Proximal Indicador",
+    "AnguloFlexMax": 258.99,
+    "AnguloExtMin": 200.16,
+    "AmplitudeMax": 58.83,
+    "Obstaculos": 3,
+    "VelocidadeMax": 1.23
+  },
+  {
+    "Nome": "Alex Fer1",
+    "Articulacao": "Proximal Indicador",
+    "AnguloFlexMax": 258.99,
+    "AnguloExtMin": 200.16,
+    "AmplitudeMax": 58.83,
+    "Obstaculos": 12,
+    "VelocidadeMax": 1.58
+  },
+  {
+    "Nome": "Marcelo",
+    "Articulacao": "Proximal Indicador",
+    "AnguloFlexMax": 253.44,
+    "AnguloExtMin": 198.66,
+    "AmplitudeMax": 54.77,
+    "Obstaculos": 27,
+    "VelocidadeMax": 2.02
+  },
+  {
+    "Nome": "Marcelo",
+    "Articulacao": "Proximal Indicador",
+    "AnguloFlexMax": 258.1,
+    "AnguloExtMin": 198.0,
+    "AmplitudeMax": 60.11,
+    "Obstaculos": 31,
+    "VelocidadeMax": 2.1
+  },
+  {
+    "Nome": "Marcelo",
+    "Articulacao": "Proximal Indicador",
+    "AnguloFlexMax": 259.02,
+    "AnguloExtMin": 197.76,
+    "AmplitudeMax": 61.26,
+    "Obstaculos": 27,
+    "VelocidadeMax": 2.02
+  },
+  {
+    "Nome": "Marcelo",
+    "Articulacao": "Proximal Indicador",
+    "AnguloFlexMax": 259.02,
+    "AnguloExtMin": 197.76,
+    "AmplitudeMax": 61.26,
+    "Obstaculos": 11,
+    "VelocidadeMax": 1.55
+  },
+  {
+    "Nome": "Fernando",
+    "Articulacao": "Proximal Indicador",
+    "AnguloFlexMax": 256.75,
+    "AnguloExtMin": 197.29,
+    "AmplitudeMax": 59.46,
+    "Obstaculos": 27,
+    "VelocidadeMax": 2.02
+  },
+  {
+    "Nome": "Fernando",
+    "Articulacao": "Proximal Indicador",
+    "AnguloFlexMax": 256.75,
+    "AnguloExtMin": 197.29,
+    "AmplitudeMax": 59.46,
+    "Obstaculos": 2,
+    "VelocidadeMax": 1.19
+  },
+  {
+    "Nome": "Fernando",
+    "Articulacao": "Proximal Indicador",
+    "AnguloFlexMax": 256.75,
+    "AnguloExtMin": 197.29,
+    "AmplitudeMax": 59.46,
+    "Obstaculos": 2,
+    "VelocidadeMax": 1.18
+  },
+  {
+    "Nome": "alex2",
+    "Articulacao": "Proximal Indicador",
+    "AnguloFlexMax": 252.2,
+    "AnguloExtMin": 197.58,
+    "AmplitudeMax": 54.62,
+    "Obstaculos": 11,
+    "VelocidadeMax": 1.55
+  },
+  {
+    "Nome": "Ana Laura",
+    "Articulacao": "Proximal Indicador",
+    "AnguloFlexMax": 256.33,
+    "AnguloExtMin": 197.4,
+    "AmplitudeMax": 58.93,
+    "Obstaculos": 30,
+    "VelocidadeMax": 2.1
+  },
+  {
+    "Nome": "Ana Laura",
+    "Articulacao": "Proximal Indicador",
+    "AnguloFlexMax": 261.81,
+    "AnguloExtMin": 190.7,
+    "AmplitudeMax": 71.11,
+    "Obstaculos": 32,
+    "VelocidadeMax": 2.13
+  },
+  {
+    "Nome": "Eiki",
+    "Articulacao": "Proximal Indicador",
+    "AnguloFlexMax": 251.85,
+    "AnguloExtMin": 201.58,
+    "AmplitudeMax": 50.26,
+    "Obstaculos": 4,
+    "VelocidadeMax": 1.0
+  },
+  {
+    "Nome": "Eiki1",
+    "Articulacao": "Proximal Indicador",
+    "AnguloFlexMax": 256.41,
+    "AnguloExtMin": 194.39,
+    "AmplitudeMax": 62.02,
+    "Obstaculos": 115,
+    "VelocidadeMax": 2.5
+  },
+  {
+    "Nome": "henrique",
+    "Articulacao": "Proximal Indicador",
+    "AnguloFlexMax": 256.6,
+    "AnguloExtMin": 195.56,
+    "AmplitudeMax": 61.04,
+    "Obstaculos": 35,
+    "VelocidadeMax": 2.2
+  },
+  {
+    "Nome": "Guilherme",
+    "Articulacao": "Proximal Indicador",
+    "AnguloFlexMax": 256.59,
+    "AnguloExtMin": 197.54,
+    "AmplitudeMax": 59.05,
+    "Obstaculos": 20,
+    "VelocidadeMax": 1.84
+  },
+  {
+    "Nome": "Alexsss",
+    "Articulacao": "Proximal Indicador",
+    "AnguloFlexMax": 255.17,
+    "AnguloExtMin": 196.96,
+    "AmplitudeMax": 58.2,
+    "Obstaculos": 15,
+    "VelocidadeMax": 1.69
+  },
+  {
+    "Nome": "alexxx",
+    "Articulacao": "Proximal Indicador",
+    "AnguloFlexMax": 253.28,
+    "AnguloExtMin": 196.33,
+    "AmplitudeMax": 56.95,
+    "Obstaculos": 23,
+    "VelocidadeMax": 1.91
+  },
+  {
+    "Nome": "Anabelle",
+    "Articulacao": "Proximal Indicador",
+    "AnguloFlexMax": 253.22,
+    "AnguloExtMin": 196.38,
+    "AmplitudeMax": 56.83,
+    "Obstaculos": 16,
+    "VelocidadeMax": 1.72
+  },
+  {
+    "Nome": "Anabelle",
+    "Articulacao": "Proximal Indicador",
+    "AnguloFlexMax": 255.32,
+    "AnguloExtMin": 194.55,
+    "AmplitudeMax": 60.77,
+    "Obstaculos": 95,
+    "VelocidadeMax": 2.5
+  },
+  {
+    "Nome": "Julia",
+    "Articulacao": "Proximal Indicador",
+    "AnguloFlexMax": 261.97,
+    "AnguloExtMin": 190.15,
+    "AmplitudeMax": 71.82,
+    "Obstaculos": 30,
+    "VelocidadeMax": 2.1
+  },
+  {
+    "Nome": "Luisa",
+    "Articulacao": "Proximal Indicador",
+    "AnguloFlexMax": 261.97,
+    "AnguloExtMin": 190.15,
+    "AmplitudeMax": 71.82,
+    "Obstaculos": 62,
+    "VelocidadeMax": 2.5
+  },
+  {
+    "Nome": "alexm",
+    "Articulacao": "Proximal Indicador",
+    "AnguloFlexMax": 254.97,
+    "AnguloExtMin": 195.78,
+    "AmplitudeMax": 59.19,
+    "Obstaculos": 17,
+    "VelocidadeMax": 1.7
+  },
+  {
+    "Nome": "Letícia",
+    "Articulacao": "Proximal Indicador",
+    "AnguloFlexMax": 258.03,
+    "AnguloExtMin": 195.78,
+    "AmplitudeMax": 62.24,
+    "Obstaculos": 89,
+    "VelocidadeMax": 2.5
+  },
+  {
+    "Nome": "Joao Victor",
+    "Articulacao": "Proximal Indicador",
+    "AnguloFlexMax": 262.2,
+    "AnguloExtMin": 195.78,
+    "AmplitudeMax": 66.42,
+    "Obstaculos": 36,
+    "VelocidadeMax": 2.21
+  },
+  {
+    "Nome": "Eliane",
+    "Articulacao": "Proximal Indicador",
+    "AnguloFlexMax": 262.2,
+    "AnguloExtMin": 193.32,
+    "AmplitudeMax": 68.88,
+    "Obstaculos": 43,
+    "VelocidadeMax": 2.37
+  },
+  {
+    "Nome": "Estela",
+    "Articulacao": "Proximal Indicador",
+    "AnguloFlexMax": 262.2,
+    "AnguloExtMin": 193.32,
+    "AmplitudeMax": 68.88,
+    "Obstaculos": 22,
+    "VelocidadeMax": 1.86
+  },
+  {
+    "Nome": "Alex",
+    "Articulacao": "Proximal Indicador",
+    "AnguloFlexMax": 254.05,
+    "AnguloExtMin": 202.33,
+    "AmplitudeMax": 51.72,
+    "Obstaculos": 7,
+    "VelocidadeMax": 1.37
+  },
+  {
+    "Nome": "Matheus",
+    "Articulacao": "Proximal Indicador",
+    "AnguloFlexMax": 254.05,
+    "AnguloExtMin": 197.14,
+    "AmplitudeMax": 56.9,
+    "Obstaculos": 8,
+    "VelocidadeMax": 1.43
+  },
+  {
+    "Nome": "Ana Clara",
+    "Articulacao": "Proximal Indicador",
+    "AnguloFlexMax": 256.61,
+    "AnguloExtMin": 191.44,
+    "AmplitudeMax": 65.16,
+    "Obstaculos": 450,
+    "VelocidadeMax": 2.5
+  },
+  {
+    "Nome": "AlexM",
+    "Articulacao": "Proximal Indicador",
+    "AnguloFlexMax": 258.35,
+    "AnguloExtMin": 195.4,
+    "AmplitudeMax": 62.95,
+    "Obstaculos": 14,
+    "VelocidadeMax": 1.64
   }
 ]
