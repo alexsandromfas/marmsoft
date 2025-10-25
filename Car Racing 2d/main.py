@@ -1,17 +1,22 @@
 import pygame
 import random
+import os, json
+try:
+    from marmsoft_sensor_provider import get_angle as sensor_provider
+except Exception:
+    sensor_provider = None
 from objects import Road, Player, Nitro, Tree, Button, \
 					Obstacle, Coins, Fuel
 
 pygame.init()
-SCREEN = WIDTH, HEIGHT = 288, 512
+SCREEN = WIDTH, HEIGHT = 432, 768
 
 info = pygame.display.Info()
 width = info.current_w
 height = info.current_h
 
 if width >= height:
-	win = pygame.display.set_mode(SCREEN, pygame.NOFRAME)
+	win = pygame.display.set_mode(SCREEN, pygame.SCALED | pygame.RESIZABLE)
 else:
 	win = pygame.display.set_mode(SCREEN, pygame.NOFRAME | pygame.SCALED | pygame.FULLSCREEN)
 
@@ -31,6 +36,8 @@ BLACK = (0, 0, 20)
 # FONTS ***********************************************************************
 
 font = pygame.font.SysFont('cursive', 32)
+font_small = pygame.font.Font(None, 28)
+font_title = pygame.font.Font(None, 40)
 
 select_car = font.render('Select Car', True, WHITE)
 
@@ -106,6 +113,10 @@ fuel_group = pygame.sprite.Group()
 obstacle_group = pygame.sprite.Group()
 
 # VARIABLES *******************************************************************
+# Calibration & articulation selection
+calib_ext_min = None
+calib_flex_max = None
+selected_artic = None
 home_page = True
 car_page = False
 game_page = False
@@ -126,7 +137,156 @@ cfuel = 100
 endx, enddx = 0, 0.5
 gameovery = -50
 
+# ---------- Helper screens: articulation selection & calibration ---------
+def _repo_root():
+	return os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+
+def get_finger_choice():
+	global selected_artic
+	# Load overlays from repo assets/Mao
+	mao_dir = os.path.join(_repo_root(), 'assets', 'Mao')
+	try:
+		base = pygame.image.load(os.path.join(mao_dir, 'mao.png')).convert_alpha()
+	except Exception:
+		base = None
+	overlays = []
+	if base:
+		for fname in sorted(os.listdir(mao_dir)):
+			if fname.lower().endswith('.png') and fname.lower() != 'mao.png':
+				try:
+					overlays.append((os.path.splitext(fname)[0], pygame.image.load(os.path.join(mao_dir,fname)).convert_alpha()))
+				except Exception:
+					pass
+	# Fallback if assets missing
+	if not base or not overlays:
+		return
+	# Scale to 70% height
+	SCALE = 0.7
+	scale = (HEIGHT * SCALE) / base.get_height()
+	base_s = pygame.transform.smoothscale(base, (int(base.get_width()*scale), int(base.get_height()*scale)))
+	ov_entries = []
+	for name, ov in overlays:
+		surf = pygame.transform.smoothscale(ov, (int(ov.get_width()*scale), int(ov.get_height()*scale)))
+		mask = pygame.mask.from_surface(surf, 10)
+		ov_entries.append((name, surf, mask))
+
+	def pretty(n):
+		base = os.path.splitext(os.path.basename(n))[0]
+		parts = [w.capitalize() for w in base.replace('-', '_').split('_') if w]
+		s = ' '.join(parts)
+		s = s.replace('Metacarpofalangica','Metacarpofalângica').replace('Interfalangica','Interfalângica').replace('Medio','Médio').replace('Minimo','Mínimo')
+		return s
+
+	running = True
+	hovered = None
+	while running:
+		for event in pygame.event.get():
+			if event.type == pygame.QUIT:
+				return
+			if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+				mx, my = event.pos
+				bx = WIDTH//2 - base_s.get_width()//2
+				by = HEIGHT//2 - base_s.get_height()//2
+				lx, ly = int(mx - bx), int(my - by)
+				if 0 <= lx < base_s.get_width() and 0 <= ly < base_s.get_height():
+					for name, surf, mask in ov_entries:
+						if 0 <= lx < surf.get_width() and 0 <= ly < surf.get_height():
+							try:
+								if mask.get_at((lx,ly)):
+									selected_artic = name
+									# persist selection
+									try:
+										cfg_path = os.path.join(_repo_root(), 'config.json')
+										cfg = {}
+										if os.path.isfile(cfg_path):
+											with open(cfg_path,'r',encoding='utf-8') as f:
+												cfg = json.load(f)
+										cfg['carracing_selected_articulation'] = selected_artic
+										with open(cfg_path,'w',encoding='utf-8') as f:
+											json.dump(cfg,f,ensure_ascii=False,indent=2)
+									except Exception:
+										pass
+									return
+							except Exception:
+								pass
+
+		# Draw
+		win.fill((0,0,0))
+		bp = (WIDTH//2 - base_s.get_width()//2, HEIGHT//2 - base_s.get_height()//2)
+		win.blit(base_s, bp)
+		# Simple hover label
+		mx,my = pygame.mouse.get_pos()
+		lx,ly = int(mx - bp[0]), int(my - bp[1])
+		label = None
+		if 0 <= lx < base_s.get_width() and 0 <= ly < base_s.get_height():
+			for name, surf, mask in ov_entries:
+				try:
+					if 0 <= lx < surf.get_width() and 0 <= ly < surf.get_height():
+						if mask.get_at((lx,ly)):
+							label = pretty(name)
+							break
+				except Exception:
+					pass
+		if label:
+			t = font_small.render(label, True, (255,255,255))
+			win.blit(t, (20, HEIGHT - t.get_height() - 16))
+		pygame.display.flip()
+		clock.tick(60)
+
+def calibrate_range():
+	global calib_ext_min, calib_flex_max
+	BTN_W, BTN_H = 180, 44
+	margin = 20
+	ext_btn = pygame.Rect(margin, HEIGHT//2 - BTN_H - 10, BTN_W, BTN_H)
+	flex_btn = pygame.Rect(margin, HEIGHT//2 + 10, BTN_W, BTN_H)
+	proceed_btn = pygame.Rect(WIDTH - margin - BTN_W, HEIGHT - margin - BTN_H, BTN_W, BTN_H)
+
+	running = True
+	while running:
+		for event in pygame.event.get():
+			if event.type == pygame.QUIT:
+				return
+			if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+				mx,my = event.pos
+				if ext_btn.collidepoint((mx,my)) and sensor_provider:
+					v = sensor_provider()
+					if isinstance(v,(int,float)):
+						calib_ext_min = v
+				elif flex_btn.collidepoint((mx,my)) and sensor_provider:
+					v = sensor_provider()
+					if isinstance(v,(int,float)):
+						calib_flex_max = v
+				elif proceed_btn.collidepoint((mx,my)) and (calib_ext_min is not None) and (calib_flex_max is not None):
+					if calib_flex_max < calib_ext_min:
+						calib_ext_min, calib_flex_max = calib_flex_max, calib_ext_min
+					return
+		win.fill((0,0,0))
+		title = font_title.render("Calibração de Limites", True, (255,255,255))
+		win.blit(title, (margin, margin))
+		cur = sensor_provider() if sensor_provider else None
+		tcur = font_small.render(f"Ângulo atual: {cur:.2f}°" if isinstance(cur,(int,float)) else "Ângulo atual: --", True, (255,255,255))
+		win.blit(tcur, (margin, HEIGHT//2 - BTN_H - 60))
+		pygame.draw.rect(win, (200,200,200), ext_btn)
+		win.blit(font_small.render("Marcar Extensão", True, (0,0,0)), font_small.render("Marcar Extensão", True, (0,0,0)).get_rect(center=ext_btn.center))
+		pygame.draw.rect(win, (200,200,200), flex_btn)
+		win.blit(font_small.render("Marcar Flexão", True, (0,0,0)), font_small.render("Marcar Flexão", True, (0,0,0)).get_rect(center=flex_btn.center))
+		# Values
+		txt_ext = font_small.render(f"Extensão: {calib_ext_min:.2f}°" if isinstance(calib_ext_min,(int,float)) else "Extensão: --", True, (255,255,255))
+		txt_flex = font_small.render(f"Flexão: {calib_flex_max:.2f}°" if isinstance(calib_flex_max,(int,float)) else "Flexão: --", True, (255,255,255))
+		win.blit(txt_ext, (ext_btn.right + 12, ext_btn.centery - txt_ext.get_height()//2))
+		win.blit(txt_flex, (flex_btn.right + 12, flex_btn.centery - txt_flex.get_height()//2))
+		# Proceed
+		ok = (calib_ext_min is not None) and (calib_flex_max is not None)
+		col = (200,200,200) if ok else (120,120,120)
+		tcol = (0,0,0) if ok else (60,60,60)
+		pygame.draw.rect(win, col, proceed_btn)
+		win.blit(font_small.render("Prosseguir", True, tcol), font_small.render("Prosseguir", True, tcol).get_rect(center=proceed_btn.center))
+		pygame.display.flip(); clock.tick(60)
+
 running = True
+get_finger_choice()
+calibrate_range()
+
 while running:
 	win.fill(BLACK)
 	
@@ -268,6 +428,18 @@ while running:
 				pygame.mixer.music.stop()
 
 	if game_page:
+		# Sensor control overrides keyboard when available
+		if sensor_provider and (calib_ext_min is not None) and (calib_flex_max is not None) and (calib_flex_max != calib_ext_min):
+			ang = sensor_provider()
+			if isinstance(ang,(int,float)):
+				ratio = max(0.0, min(1.0, (ang - calib_ext_min) / (calib_flex_max - calib_ext_min)))
+				# dead-zone center
+				if ratio < 0.4:
+					move_left, move_right = True, False
+				elif ratio > 0.6:
+					move_left, move_right = False, True
+				else:
+					move_left, move_right = False, False
 		win.blit(bg, (0,0))
 		road.update(speed)
 		road.draw(win)

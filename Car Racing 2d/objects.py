@@ -2,13 +2,19 @@ import math
 import pygame
 import random
 
-SCREEN = WIDTH, HEIGHT = 288, 512
+SCREEN = WIDTH, HEIGHT = 432, 768
+SCALE_K = WIDTH / 288.0
 
 BLUE = (53, 81, 92)
 RED = (255, 0, 0)
 YELLOW = (255, 255, 0)
 
-lane_pos = [50, 95, 142, 190]
+lane_pos = [
+	int(50 * SCALE_K),
+	int(95 * SCALE_K),
+	int(142 * SCALE_K),
+	int(190 * SCALE_K)
+]
 
 class Road():
 	def __init__(self):
@@ -41,20 +47,22 @@ class Player(pygame.sprite.Sprite):
 	def __init__(self, x, y, type):
 		super(Player, self).__init__()
 		self.image = pygame.image.load(f'Assets/cars/{type+1}.png')
-		self.image = pygame.transform.scale(self.image, (48, 82))
+		self.image = pygame.transform.scale(self.image, (int(48*SCALE_K), int(82*SCALE_K)))
 		self.rect = self.image.get_rect()
 		self.rect.x = x
 		self.rect.y = y
 
 	def update(self, left, right):
 		if left:
-			self.rect.x -= 5
-			if self.rect.x <= 40:
-				self.rect.x = 40
+			self.rect.x -= int(5*SCALE_K)
+			min_x = int(40 * SCALE_K)
+			if self.rect.x <= min_x:
+				self.rect.x = min_x
 		if right:
-			self.rect.x += 5
-			if self.rect.right >= 250:
-				self.rect.right = 250
+			self.rect.x += int(5*SCALE_K)
+			max_right = int(250 * SCALE_K)
+			if self.rect.right >= max_right:
+				self.rect.right = max_right
 
 		self.mask = pygame.mask.from_surface(self.image)
 
@@ -71,14 +79,14 @@ class Obstacle(pygame.sprite.Sprite):
 			ctype = random.randint(1, 8)
 			self.image = pygame.image.load(f'Assets/cars/{ctype}.png')
 			self.image = pygame.transform.flip(self.image, False, True)
-			self.image = pygame.transform.scale(self.image, (48, 82))
+			self.image = pygame.transform.scale(self.image, (int(48*SCALE_K), int(82*SCALE_K)))
 		if type == 2:
 			self.image = pygame.image.load('Assets/barrel.png')
-			self.image = pygame.transform.scale(self.image, (24, 36))
+			self.image = pygame.transform.scale(self.image, (int(24*SCALE_K), int(36*SCALE_K)))
 			dx = 10
 		elif type == 3:
 			self.image = pygame.image.load('Assets/roadblock.png')
-			self.image = pygame.transform.scale(self.image, (50, 25))
+			self.image = pygame.transform.scale(self.image, (int(50*SCALE_K), int(25*SCALE_K)))
 
 		self.rect = self.image.get_rect()
 		self.rect.x = random.choice(lane_pos) + dx
@@ -95,13 +103,13 @@ class Obstacle(pygame.sprite.Sprite):
 class Nitro:
 	def __init__(self, x, y):
 		self.image = pygame.image.load('Assets/nitro.png')
-		self.image = pygame.transform.scale(self.image, (42, 42))
+		self.image = pygame.transform.scale(self.image, (int(42*SCALE_K), int(42*SCALE_K)))
 		self.rect = self.image.get_rect()
 		self.rect.x = x
 		self.rect.y = y
 
 		self.gas = 0
-		self.radius = 20
+		self.radius = int(20 * SCALE_K)
 		self.CENTER = self.rect.centerx, self.rect.centery
 
 	def update(self, nitro_on):

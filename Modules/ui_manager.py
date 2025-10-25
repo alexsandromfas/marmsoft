@@ -1892,7 +1892,7 @@ class GamesPage(QWidget):
         btn_cr = QToolButton(); btn_cr.setAutoRaise(True); btn_cr.setCursor(Qt.CursorShape.PointingHandCursor)
         try:
             repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-            icon_cr = os.path.join(repo_root, 'Car Racing 2d','icon.png')
+            icon_cr = os.path.join(repo_root, 'Car Racing 2d','Assets','icon.png')
             if os.path.isfile(icon_cr):
                 btn_cr.setIcon(QIcon(icon_cr))
                 btn_cr.setIconSize(QSize(160,160))
@@ -2303,6 +2303,7 @@ class MainWindow(QMainWindow):
     def _launch_car_racing(self):
         try:
             from threading import Thread
+            import types
             def run_game():
                 import os, sys, importlib
                 base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -2312,6 +2313,23 @@ class MainWindow(QMainWindow):
                     os.chdir(game_dir)
                     if game_dir not in sys.path:
                         sys.path.insert(0, game_dir)
+                    # Provide a live angle provider via a synthetic module
+                    def get_angle():
+                        try:
+                            cfg_path = os.path.join(base_dir, 'config.json')
+                            with open(cfg_path, 'r', encoding='utf-8') as f:
+                                cfg = json.load(f)
+                            art = cfg.get('carracing_selected_articulation')
+                            mapping = cfg.get('sensorMapping', {})
+                            sensor = mapping.get(art)
+                            if sensor and sensor != 'Nenhum':
+                                return self.latest_readings.get(f'{sensor}_angle', 0.0)
+                        except Exception:
+                            pass
+                        return 0.0
+                    mod = types.ModuleType('marmsoft_sensor_provider')
+                    mod.get_angle = get_angle  # type: ignore
+                    sys.modules['marmsoft_sensor_provider'] = mod
                     # Import and run game (main.py executes on import)
                     if 'main' in sys.modules:
                         del sys.modules['main']

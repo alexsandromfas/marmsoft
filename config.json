@@ -11,5 +11,6 @@
     "metacarpofalangica_indicador": "flex2",
     "metacarpofalangica_minimo": "flex7"
   },
-  "flybird_selected_articulation": "interfalangica_polegar"
+  "flybird_selected_articulation": "interfalangica_polegar",
+  "carracing_selected_articulation": "interfalangica_polegar"
 }
