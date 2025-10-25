@@ -3,11 +3,11 @@ import sys
 from typing import List, Tuple
 
 from PyQt6.QtCore import Qt, QPoint, QPointF, pyqtSignal, QObject, QRectF, QEvent
-from PyQt6.QtGui import QPixmap, QColor, QPainter
+from PyQt6.QtGui import QPixmap, QColor, QPainter, QIcon
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QFrame,
     QLabel, QComboBox, QListWidget, QListWidgetItem, QGraphicsView, QGraphicsScene,
-    QGraphicsPixmapItem, QGraphicsItem
+    QGraphicsPixmapItem, QGraphicsItem, QScrollArea, QGridLayout
 )
 
 
@@ -34,6 +34,9 @@ def build_qss(theme=DARK_THEME) -> str:
         f"QPushButton {{ background:{theme['btn_bg']}; border:1px solid {theme['btn_border']}; border-radius:12px; color:{btn_text_color}; padding:8px 16px; font-weight:500; }}\n"
         f"QPushButton:hover {{ background:{theme['btn_bg_hover']}; }}\n"
         f"QPushButton:pressed {{ background:{theme['btn_bg_press']}; }}\n"
+        # Destaque da linha selecionada na lista de mapeamento
+        f"QFrame#MapRow[selected='true'] {{ background: rgba(76, 175, 80, 0.18); border: 1px solid #4caf50; border-radius: 8px; }}\n"
+        f"QFrame#MapRow {{ border: 1px solid transparent; border-radius: 8px; }}\n"
     )
     return qss
 
@@ -129,13 +132,25 @@ class ArticulationItem(QGraphicsPixmapItem):
 class HandOverlayWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle('Teste: Mapeamento de Articulações')
+        self.setWindowTitle('Mapeamento de Sensores')
         self.resize(1100, 700)
         # Proíbe maximização desta janela (remove botão de maximizar)
         self.setWindowFlag(Qt.WindowType.WindowMaximizeButtonHint, False)
         # Estilo de janela não redimensionável no Windows
         self.setWindowFlag(Qt.WindowType.MSWindowsFixedSizeDialogHint, True)
         self.setStyleSheet(build_qss())
+        # Ícone do app, se disponível
+        try:
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            icon_path = os.path.join(base_dir, 'assets', 'icon.png')
+            if os.path.isfile(icon_path):
+                self.setWindowIcon(QIcon(icon_path))
+        except Exception:
+            pass
+
+        # Estado de mapeamento
+        self.mapping = {}
+        self.combo_by_name = {}
 
         # Root layout
         root = QWidget()
@@ -164,17 +179,22 @@ class HandOverlayWindow(QMainWindow):
 
         # Right: Selection panel
         right = QFrame(); right.setObjectName('RightPanel')
-        right.setMinimumWidth(320)
+        right.setMinimumWidth(420)
         rp = QVBoxLayout(right); rp.setContentsMargins(16,16,16,16); rp.setSpacing(12)
-        self.lbl_sel_title = QLabel('Articulação selecionada:')
-        self.lbl_sel_title.setProperty('class','section-title')
-        self.lbl_selected = QLabel('—')
-        rp.addWidget(self.lbl_sel_title)
-        rp.addWidget(self.lbl_selected)
-        rp.addSpacing(8)
-        rp.addWidget(QLabel('Escolha o sensor correspondente:'))
-        self.cmb_sensor = QComboBox(); self.cmb_sensor.addItems([f'flex{i}' for i in range(1,9)])
-        rp.addWidget(self.cmb_sensor)
+        title = QLabel('Mapeamento de Articulações → Sensores')
+        title.setProperty('class','section-title')
+        rp.addWidget(title)
+
+        # Área rolável com grid
+        self.scroll = QScrollArea(); self.scroll.setWidgetResizable(True)
+        self.map_container = QWidget(); self.map_layout = QGridLayout(self.map_container)
+        self.map_layout.setContentsMargins(0,0,0,0)
+        self.map_layout.setHorizontalSpacing(10)
+        self.map_layout.setVerticalSpacing(8)
+        self.scroll.setWidget(self.map_container)
+        rp.addWidget(self.scroll, 1)
+
+        # Removido indicador textual; usaremos realce direto na lista
         rp.addStretch(1)
         # Legend label near mouse (overlay)
         self.mouse_label = QLabel('', self.view)
@@ -187,8 +207,27 @@ class HandOverlayWindow(QMainWindow):
         # Load images
         base_path = self._find_mao_folder()
         self._load_images(base_path)
+        # Carrega config existente e monta painel
+        self._load_config_mapping()
+        self._build_mapping_panel()
         # Proíbe redimensionamento por arrastar as bordas: fixa o tamanho atual
         self.setFixedSize(self.size())
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        # Reajusta ao exibir e conecta sinal de troca de tela (DPI/escala)
+        self._fit_view()
+        try:
+            wh = self.windowHandle()
+            if wh and not getattr(self, '_screen_signal_connected', False):
+                wh.screenChanged.connect(self._on_screen_changed)
+                self._screen_signal_connected = True
+        except Exception:
+            pass
+
+    def _on_screen_changed(self, _screen):
+        # Quando mover para outro monitor, refaz ajuste
+        self._fit_view()
 
     def changeEvent(self, event):
         # Impede que a janela seja maximizada por atalhos do SO
@@ -209,10 +248,8 @@ class HandOverlayWindow(QMainWindow):
         vp = self.view.viewport().size()
         if vp.height() <= 0:
             return
-        # scale based on height only e com boost adicional para "aumentar" a imagem
+        # Escala baseada apenas na altura para que a imagem caiba exatamente
         sy = vp.height() / rect.height()
-        SCALE_BOOST = 1.25  # aumentar aparenta mais preenchimento; ajuste fino se necessário
-        sy *= SCALE_BOOST
         self.view.resetTransform()
         self.view.scale(sy, sy)
         # Center the view on the base rect center
@@ -282,11 +319,9 @@ class HandOverlayWindow(QMainWindow):
             base_item = QGraphicsPixmapItem(base_pm)
             base_item.setZValue(0)
             self.scene.addItem(base_item)
-            # Corrige para alta DPI: dimensões lógicas = pixels / devicePixelRatio
-            dpr = float(base_pm.devicePixelRatio()) if hasattr(base_pm, 'devicePixelRatio') else 1.0
-            lw = float(base_pm.width()) / dpr
-            lh = float(base_pm.height()) / dpr
-            self.view.setSceneRect(QRectF(0, 0, lw, lh))
+            # Usa boundingRect do item para dimensões lógicas corretas
+            br = base_item.boundingRect()
+            self.view.setSceneRect(QRectF(0, 0, br.width(), br.height()))
         # guarda referência para ajuste de zoom
         self._base_item = base_item if isinstance(base_item, QGraphicsPixmapItem) else None
         # Markers
@@ -305,12 +340,15 @@ class HandOverlayWindow(QMainWindow):
             item.signals.clicked.connect(self._on_item_clicked)
             self.scene.addItem(item)
             self.items.append(item)
+        # Lista de articulações para painel
+        self.articulation_names = [it.name for it in self.items]
         # Ajusta a visualização após carregar
         self._fit_view()
 
     def _on_item_hovered(self, name: str, pos: QPointF):
-        # show label near cursor inside the view
-        self.mouse_label.setText(pretty_label(name))
+        # show label near cursor inside the view, incluindo sensor atribuído
+        sensor = (self.mapping.get(name) if hasattr(self, 'mapping') else None) or 'Nenhum'
+        self.mouse_label.setText(f"{pretty_label(name)} — Sensor: {sensor}")
         self.mouse_label.adjustSize()
         # map scene pos to view coordinates
         vp = self.view.mapFromScene(pos)
@@ -321,12 +359,103 @@ class HandOverlayWindow(QMainWindow):
         self.mouse_label.setVisible(False)
 
     def _on_item_clicked(self, name: str):
-        # clear other selections
+        # Apenas destaca seleção
         for it in self.items:
             if it.name != name:
                 it.reset_selection()
-        # update right panel
-        self.lbl_selected.setText(pretty_label(name))
+        # Realça a linha correspondente na lista
+        self._highlight_row(name)
+
+    # ---------- Config (carregar/salvar) ----------
+    def _config_path(self) -> str:
+        return os.path.join(os.getcwd(), 'config.json')
+
+    def _load_config_mapping(self):
+        try:
+            import json
+            with open(self._config_path(), 'r', encoding='utf-8') as f:
+                cfg = json.load(f)
+            self.mapping = dict(cfg.get('sensorMapping', {}))
+        except Exception:
+            self.mapping = {}
+
+    def _save_config_mapping(self):
+        try:
+            import json
+            cfg = {}
+            try:
+                with open(self._config_path(), 'r', encoding='utf-8') as f:
+                    cfg = json.load(f)
+            except Exception:
+                cfg = {}
+            cfg['sensorMapping'] = self.mapping
+            with open(self._config_path(), 'w', encoding='utf-8') as f:
+                json.dump(cfg, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    # ---------- Painel de mapeamento ----------
+    def _build_mapping_panel(self):
+        # Limpa grid
+        if hasattr(self, 'map_layout'):
+            while self.map_layout.count():
+                it = self.map_layout.takeAt(0)
+                w = it.widget()
+                if w:
+                    w.deleteLater()
+        self.combo_by_name = {}
+        self.row_by_name = {}
+        names = sorted(getattr(self, 'articulation_names', []))
+        all_sensors = [f'flex{i}' for i in range(1,9)]
+        for row, name in enumerate(names):
+            row_frame = QFrame(); row_frame.setObjectName('MapRow')
+            hl = QHBoxLayout(row_frame); hl.setContentsMargins(8,6,8,6); hl.setSpacing(8)
+            lbl = QLabel(pretty_label(name))
+            cmb = QComboBox(); cmb.setEditable(False)
+            cmb.currentTextChanged.connect(lambda _v, n=name: self._on_combo_changed(n))
+            self.combo_by_name[name] = cmb
+            self.row_by_name[name] = row_frame
+            hl.addWidget(lbl, 1)
+            hl.addWidget(cmb, 1)
+            self.map_layout.addWidget(row_frame, row, 0, 1, 2)
+        # Preenche opções respeitando unicidade
+        self._refresh_combo_options()
+
+    def _highlight_row(self, name: str):
+        try:
+            for n, row in self.row_by_name.items():
+                row.setProperty('selected', 'true' if n == name else 'false')
+                row.style().unpolish(row); row.style().polish(row); row.update()
+            # Garantir visibilidade
+            if name in self.row_by_name:
+                self.scroll.ensureWidgetVisible(self.row_by_name[name])
+        except Exception:
+            pass
+
+    def _used_sensors(self) -> set:
+        return {v for v in self.mapping.values() if v and v != 'Nenhum'}
+
+    def _refresh_combo_options(self):
+        all_sensors = [f'flex{i}' for i in range(1,9)]
+        for name, cmb in self.combo_by_name.items():
+            current = self.mapping.get(name, 'Nenhum')
+            used = self._used_sensors() - ({current} if current else set())
+            available = ['Nenhum'] + [s for s in all_sensors if s not in used]
+            prev = cmb.currentText()
+            cmb.blockSignals(True)
+            cmb.clear(); cmb.addItems(available)
+            target = current if current in available else (prev if prev in available else 'Nenhum')
+            cmb.setCurrentText(target)
+            cmb.blockSignals(False)
+
+    def _on_combo_changed(self, name: str):
+        cmb = self.combo_by_name.get(name)
+        if not cmb:
+            return
+        sel = cmb.currentText()
+        self.mapping[name] = sel if sel != 'Nenhum' else 'Nenhum'
+        self._refresh_combo_options()
+        self._save_config_mapping()
 
 
 def main():

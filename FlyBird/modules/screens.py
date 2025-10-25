@@ -174,49 +174,194 @@ class Screens:
 
 
     def get_finger_choice(self):
-        """Let the player choose which finger to exercise."""
-        font_small = pygame.font.Font(None, 36)
-        finger_prompt = font_small.render("Escolha o dedo para exercitar:", True, WHITE)
+        """Selection screen using hand overlays; writes chosen articulation to config.json."""
+        # Helpers
+        import os, json
+        def repo_root():
+            return os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+        def mao_dir():
+            # Prefer assets/Mao
+            p = os.path.join(repo_root(), 'assets', 'Mao')
+            return p if os.path.isdir(p) else None
+        def pretty(name: str) -> str:
+            base = os.path.splitext(os.path.basename(name))[0]
+            parts = [w.capitalize() for w in base.replace('-', '_').split('_') if w]
+            s = ' '.join(parts)
+            s = s.replace('Metacarpofalangica','Metacarpofalângica').replace('Interfalangica','Interfalângica').replace('Medio','Médio').replace('Minimo','Mínimo')
+            return s
+        def load_overlays():
+            d = mao_dir()
+            if not d:
+                return None, []
+            base_path = os.path.join(d, 'mao.png')
+            try:
+                base_surf = pygame.image.load(base_path).convert_alpha()
+            except Exception:
+                base_surf = None
+            overlays = []
+            for fname in sorted(os.listdir(d)):
+                if not fname.lower().endswith('.png'):
+                    continue
+                if fname.lower() == 'mao.png':
+                    continue
+                fp = os.path.join(d, fname)
+                try:
+                    ov = pygame.image.load(fp).convert_alpha()
+                    overlays.append((os.path.splitext(fname)[0], ov))
+                except Exception:
+                    pass
+            return base_surf, overlays
+        def tint_surface(surf, color=(0,255,0), alpha=120):
+            tint = pygame.Surface(surf.get_size(), pygame.SRCALPHA)
+            tint.fill((*color, alpha))
+            out = surf.copy()
+            out.blit(tint, (0,0), special_flags=pygame.BLEND_RGBA_MULT)
+            return out
 
-        # Define finger buttons
-        fingers = ['Polegar', 'Indicador', 'Médio', 'Anelar', 'Mínimo']
-        finger_buttons = []
-        button_width = 200
-        button_height = 50
-        button_margin = 10
-        total_height = len(fingers) * (button_height + button_margin) - button_margin
-        start_y = HEIGHT // 2 - total_height // 2 + 50
+        base_surf, overlays = load_overlays()
+        if not base_surf or not overlays:
+            # Fallback: if assets missing, keep old buttons
+            font_small = pygame.font.Font(None, 36)
+            msg = font_small.render("Assets de mão não encontrados.", True, WHITE)
+            self.screen.fill(BLACK)
+            self.screen.blit(msg, (WIDTH//2 - msg.get_width()//2, HEIGHT//2))
+            pygame.display.flip()
+            pygame.time.delay(1200)
+            # fallback to previous simple list
+            fingers = ['Polegar', 'Indicador', 'Médio', 'Anelar', 'Mínimo']
+            active = True
+            while active:
+                for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
+                        active=False; self.game.running=False; return
+                    if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                        active=False; return
+                self.screen.fill(BLACK)
+                self.screen.blit(msg, (WIDTH//2 - msg.get_width()//2, HEIGHT//2))
+                pygame.display.flip(); self.clock.tick(30)
+            return
 
-        for i, finger in enumerate(fingers):
-            rect = pygame.Rect(WIDTH // 2 - button_width // 2, start_y + i * (button_height + button_margin), button_width, button_height)
-            finger_buttons.append((rect, finger))
+        # Scale to 85% of screen height to avoid UI overlapping markers
+        MARGIN = 24
+        SCALE = 0.85
+        scale = (HEIGHT * SCALE) / base_surf.get_height()
+        base_scaled = pygame.transform.smoothscale(base_surf, (int(base_surf.get_width()*scale), int(base_surf.get_height()*scale)))
+        overlay_entries = []  # (name, surf_scaled, mask, tinted_selected, tinted_hover)
+        for name, ov in overlays:
+            surf_s = pygame.transform.smoothscale(ov, (int(ov.get_width()*scale), int(ov.get_height()*scale)))
+            mask = pygame.mask.from_surface(surf_s, 10)
+            tinted_sel = tint_surface(surf_s, color=(0,255,0), alpha=140)
+            tinted_hover = tint_surface(surf_s, color=(128,200,255), alpha=120)
+            overlay_entries.append([name, surf_s, mask, tinted_sel, tinted_hover])
 
-        active = True
-        while active:
+        selected = None
+        font_small = pygame.font.Font(None, 32)
+        font_title = pygame.font.Font(None, 40)
+        title_surf = font_title.render("Escolha a articulação (clique na imagem)", True, WHITE)
+        # Confirm button bottom-right
+        BTN_W, BTN_H = 240, 44
+        confirm_rect = pygame.Rect(WIDTH - MARGIN - BTN_W, HEIGHT - MARGIN - BTN_H, BTN_W, BTN_H)
+
+        # Load current mapping for display
+        cfg_path = os.path.join(repo_root(), 'config.json')
+        def read_mapping():
+            try:
+                with open(cfg_path, 'r', encoding='utf-8') as f:
+                    c = json.load(f)
+                return c.get('sensorMapping', {})
+            except Exception:
+                return {}
+
+        running = True
+        while running:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
-                    active = False
                     self.game.running = False
                     return
-                if event.type == pygame.MOUSEBUTTONDOWN:
-                    mouse_pos = event.pos
-                    for rect, finger in finger_buttons:
-                        if rect.collidepoint(mouse_pos):
-                            self.game.selected_finger = finger.lower()
-                            active = False
-                            return
+                if event.type == pygame.MOUSEMOTION:
+                    pass
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    mx,my = event.pos
+                    # detect top-left area of image (we draw at left centered horizontally?)
+                    # We'll draw base at center horizontally
+                    bx = WIDTH//2 - base_scaled.get_width()//2
+                    by = HEIGHT//2 - base_scaled.get_height()//2
+                    local = (mx - bx, my - by)
+                    if 0 <= local[0] < base_scaled.get_width() and 0 <= local[1] < base_scaled.get_height():
+                        # within image; overlays are same size and aligned
+                        lx, ly = int(local[0]), int(local[1])
+                        for name, surf_s, mask, _tinted_sel, _tinted_hover in overlay_entries:
+                            try:
+                                if 0 <= lx < surf_s.get_width() and 0 <= ly < surf_s.get_height():
+                                    if mask.get_at((lx,ly)):
+                                        selected = name
+                                        break
+                            except Exception:
+                                pass
+                    # Confirm click
+                    if confirm_rect.collidepoint((mx,my)) and selected:
+                        # Persist selection
+                        try:
+                            cfg = {}
+                            if os.path.isfile(cfg_path):
+                                with open(cfg_path, 'r', encoding='utf-8') as f:
+                                    cfg = json.load(f)
+                            cfg['flybird_selected_articulation'] = selected
+                            with open(cfg_path, 'w', encoding='utf-8') as f:
+                                json.dump(cfg, f, ensure_ascii=False, indent=2)
+                        except Exception:
+                            pass
+                        # Also store pretty label on game for CSV
+                        self.game.selected_finger = pretty(selected)
+                        return
 
+            # Draw
             self.screen.fill(BLACK)
-            # Draw finger prompt
-            self.screen.blit(finger_prompt, (WIDTH // 2 - finger_prompt.get_width() // 2, HEIGHT // 6))
-
-            # Draw finger buttons
-            for rect, finger in finger_buttons:
-                pygame.draw.rect(self.screen, WHITE, rect)
-                finger_text = font_small.render(finger, True, BLACK)
-                text_rect = finger_text.get_rect(center=rect.center)
-                self.screen.blit(finger_text, text_rect)
+            # Center image (with reduced height)
+            base_pos = (WIDTH//2 - base_scaled.get_width()//2, HEIGHT//2 - base_scaled.get_height()//2)
+            self.screen.blit(base_scaled, base_pos)
+            # Draw all overlays normally, then apply tint for hovered/selected so others don't disappear
+            mx,my = pygame.mouse.get_pos()
+            local = (mx - base_pos[0], my - base_pos[1])
+            mapping = read_mapping()
+            hovered = None
+            # First draw all markers
+            for name, surf_s, _mask, _tinted_sel, _tinted_hover in overlay_entries:
+                self.screen.blit(surf_s, base_pos)
+            # Determine hovered by per-pixel alpha
+            lx, ly = int(local[0]), int(local[1])
+            if 0 <= lx < base_scaled.get_width() and 0 <= ly < base_scaled.get_height():
+                for name, surf_s, mask, _ts, _th in overlay_entries:
+                    try:
+                        if 0 <= lx < surf_s.get_width() and 0 <= ly < surf_s.get_height():
+                            if mask.get_at((lx,ly)):
+                                hovered = name
+                                break
+                    except Exception:
+                        pass
+            # Then draw highlight for selected and hovered
+            for name, surf_s, _mask, tinted_sel, tinted_hover in overlay_entries:
+                if selected == name:
+                    self.screen.blit(tinted_sel, base_pos)
+                elif hovered == name:
+                    self.screen.blit(tinted_hover, base_pos)
+            # Title (top-left)
+            self.screen.blit(title_surf, (MARGIN, MARGIN))
+            # Selected / hovered label and mapped sensor (bottom-left)
+            info_name = selected or hovered
+            if info_name:
+                info = f"{pretty(info_name)}"
+                sensor = mapping.get(info_name)
+                if sensor:
+                    info += f" — Sensor: {sensor}"
+                text = font_small.render(info, True, WHITE)
+                self.screen.blit(text, (MARGIN, HEIGHT - MARGIN - text.get_height()))
+            # Confirm button (bottom-right)
+            col = (200,200,200) if selected else (120,120,120)
+            pygame.draw.rect(self.screen, col, confirm_rect)
+            btn_text = font_small.render("Confirmar", True, BLACK if selected else (60,60,60))
+            self.screen.blit(btn_text, btn_text.get_rect(center=confirm_rect.center))
 
             pygame.display.flip()
-            self.clock.tick(30)
+            self.clock.tick(60)
 

@@ -115,14 +115,20 @@ class Game:
 
     def draw(self):
         """Render all game elements to the screen."""
-        self.screen.blit(self.background, (0, 0))
+        # Scale background to current window size
+        w,h = self.screen.get_size()
+        if self.background.get_width() != w or self.background.get_height() != h:
+            bg = pygame.transform.smoothscale(self.background, (w,h))
+        else:
+            bg = self.background
+        self.screen.blit(bg, (0, 0))
         self.clouds.draw(self.screen)
         self.bird.draw(self.screen)
         self.woods.draw(self.screen)
 
         # Draw lives
         lives_text = self.font.render(f"Vidas: {self.bird.lives}", True, WHITE)
-        self.screen.blit(lives_text, (WIDTH - 150, 20))
+        self.screen.blit(lives_text, (w - 150, 20))
 
         pygame.display.flip()
 

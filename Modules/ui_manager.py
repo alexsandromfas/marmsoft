@@ -1858,12 +1858,36 @@ class GameCanvas(QWidget):
 class GamesPage(QWidget):
     def __init__(self, launch_flybird: Callable[[],None]):
         super().__init__()
-        lay = QVBoxLayout(self)
-        lay.addWidget(QLabel("Jogos"))
-        btn = QPushButton("FlyBird")
-        btn.clicked.connect(launch_flybird)
-        lay.addWidget(btn)
-        lay.addStretch()
+        lay = QVBoxLayout(self); lay.setSpacing(16)
+        title = QLabel("Jogos"); title.setProperty('class','section-title')
+        lay.addWidget(title)
+        # Grade simples de jogos (apenas FlyBird por enquanto)
+        grid = QGridLayout(); grid.setSpacing(18)
+        from PyQt6.QtWidgets import QToolButton
+        # Monta tile com ícone e rótulo abaixo
+        tile = QFrame(); tile.setObjectName('GameTile')
+        tl = QVBoxLayout(tile); tl.setContentsMargins(12,12,12,12); tl.setSpacing(8); tl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        btn_icon = QToolButton(); btn_icon.setAutoRaise(True); btn_icon.setCursor(Qt.CursorShape.PointingHandCursor)
+        # Carrega ícone do jogo
+        try:
+            repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+            icon_path = os.path.join(repo_root, 'FlyBird','assets','icon','icon_flybird.png')
+            if os.path.isfile(icon_path):
+                btn_icon.setIcon(QIcon(icon_path))
+                btn_icon.setIconSize(QSize(160,160))
+        except Exception:
+            pass
+        btn_icon.clicked.connect(launch_flybird)
+        lbl = QLabel('FlyBird'); lbl.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        tl.addWidget(btn_icon, 0, Qt.AlignmentFlag.AlignHCenter)
+        tl.addWidget(lbl, 0, Qt.AlignmentFlag.AlignHCenter)
+        # Deixa o tile clicável também
+        def _tile_mousePressEvent(_e):
+            launch_flybird()
+        tile.mousePressEvent = _tile_mousePressEvent  # type: ignore
+        grid.addWidget(tile, 0, 0)
+        lay.addLayout(grid)
+        lay.addStretch(1)
 
 class HistoryModel(QAbstractTableModel):
     def __init__(self):
@@ -2234,8 +2258,21 @@ class MainWindow(QMainWindow):
             from threading import Thread
             from FlyBird.main_fb import main_fb
             def run_game():
-                # fornece função de sensor flex6 se disponível
-                get_angle = lambda: self.latest_readings.get('flex6_angle', 0.0)
+                # Provedor de ângulo baseado no mapeamento e articulação escolhida no jogo
+                import json, os
+                cfg_path = os.path.join(os.getcwd(), 'config.json')
+                def get_angle():
+                    try:
+                        with open(cfg_path, 'r', encoding='utf-8') as f:
+                            cfg = json.load(f)
+                        art = cfg.get('flybird_selected_articulation')
+                        mapping = cfg.get('sensorMapping', {})
+                        sensor = mapping.get(art)
+                        if sensor and sensor != 'Nenhum':
+                            return self.latest_readings.get(f'{sensor}_angle', 0.0)
+                    except Exception:
+                        pass
+                    return 0.0
                 main_fb(sensor_data_provider=get_angle)
             Thread(target=run_game, daemon=True).start()
             self.page_dev.add_line("FlyBird iniciado")
@@ -2507,8 +2544,15 @@ class MainWindow(QMainWindow):
     # ---------- Extensão Config (BLE / Filter) ----------
     def _extend_settings_with_ble_and_filter(self):
         # Inserir widgets extras abaixo do formulário existente
-        from PyQt6.QtWidgets import QVBoxLayout, QListWidget, QHBoxLayout
+        from PyQt6.QtWidgets import QVBoxLayout, QListWidget, QHBoxLayout, QPushButton
         host_layout = self.page_settings.layout()
+        # Seção: Mapeamento de Sensores
+        map_title = QLabel("Mapeamento de Sensores")
+        map_title.setProperty('class','section-title')
+        host_layout.addRow(map_title)
+        btn_map = QPushButton("Abrir janela de mapeamento…")
+        btn_map.clicked.connect(self._open_sensor_mapping)
+        host_layout.addRow(btn_map)
         # Container visual
         ble_title = QLabel("Conexão Bluetooth")
         ble_title.setProperty('class','section-title')
@@ -2589,6 +2633,21 @@ class MainWindow(QMainWindow):
         self._ble_target_uuid = self._load_ble_service_uuid()
         self._ble_last_device = self._load_last_ble_device()
         self._ble_thread = None
+
+    def _open_sensor_mapping(self):
+        try:
+            from Modules.mapeamento_sensores import HandOverlayWindow
+            # Guarda referência para evitar GC
+            if not hasattr(self, '_mapping_win') or self._mapping_win is None:
+                self._mapping_win = HandOverlayWindow()
+            self._mapping_win.show()
+            self._mapping_win.raise_(); self._mapping_win.activateWindow()
+            self.page_dev.add_line("Janela de mapeamento aberta")
+        except Exception as e:
+            try:
+                self.page_dev.add_line(f"Erro ao abrir mapeamento: {e}")
+            except Exception:
+                pass
 
     def _alpha_changed(self, val: int):
         alpha = val/100.0

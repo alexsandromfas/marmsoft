@@ -1,5 +1,15 @@
 {
   "lastBleDevice": "F8:B3:B7:20:3E:F6",
   "bleServiceUuid": "abcdef01-1234-5678-1234-56789abcdef0",
-  "lastLoadCellPort": "COM12"
+  "lastLoadCellPort": "COM12",
+  "sensorMapping": {
+    "interfalangica_polegar": "flex3",
+    "proximal_indicador": "flex5",
+    "metacarpofalangica_medio": "flex6",
+    "proximal_medio": "Nenhum",
+    "metacarpofalangica_anelar": "flex4",
+    "metacarpofalangica_indicador": "flex2",
+    "metacarpofalangica_minimo": "flex7"
+  },
+  "flybird_selected_articulation": "interfalangica_polegar"
 }
