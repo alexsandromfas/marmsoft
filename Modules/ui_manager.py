@@ -2790,15 +2790,6 @@ class MainWindow(QMainWindow):
                     name, vstr = part.split('=')
                     voltage = float(vstr.rstrip('V'))
                     sid = name.lower()
-                    # -------- Mapeamento lógico flex3 <-> flex8 --------
-                    # Para atender necessidade de inversão dos canais físicos, trocamos
-                    # a identificação antes de alimentar backend / leituras.
-                    # Assim: dado vindo como flex3 passa a ser tratado como flex8 e vice‑versa.
-                    # (Reversível removendo bloco.)
-                    if sid == 'flex3':
-                        sid = 'flex8'
-                    elif sid == 'flex8':
-                        sid = 'flex3'
                     if sid in self.sensor_backend:
                         # Inverter FSR: 0N ~ 3.3V, máximo ~ 0V -> tensão efetiva
                         if sid.startswith('fsr'):
