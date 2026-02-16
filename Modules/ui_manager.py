@@ -1886,26 +1886,7 @@ class GamesPage(QWidget):
         tile_fb.mousePressEvent = _tile_fb_click  # type: ignore
         grid.addWidget(tile_fb, 0, 0)
 
-        # --- Tile Car Racing 2D ---
-        tile_cr = QFrame(); tile_cr.setObjectName('GameTile')
-        tl_cr = QVBoxLayout(tile_cr); tl_cr.setContentsMargins(12,12,12,12); tl_cr.setSpacing(8); tl_cr.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        btn_cr = QToolButton(); btn_cr.setAutoRaise(True); btn_cr.setCursor(Qt.CursorShape.PointingHandCursor)
-        try:
-            repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-            icon_cr = os.path.join(repo_root, 'Car Racing 2d','Assets','icon.png')
-            if os.path.isfile(icon_cr):
-                btn_cr.setIcon(QIcon(icon_cr))
-                btn_cr.setIconSize(QSize(160,160))
-        except Exception:
-            pass
-        btn_cr.clicked.connect(launch_car_racing)
-        lbl_cr = QLabel('Car Racing'); lbl_cr.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        tl_cr.addWidget(btn_cr, 0, Qt.AlignmentFlag.AlignHCenter)
-        tl_cr.addWidget(lbl_cr, 0, Qt.AlignmentFlag.AlignHCenter)
-        def _tile_cr_click(_e):
-            launch_car_racing()
-        tile_cr.mousePressEvent = _tile_cr_click  # type: ignore
-        grid.addWidget(tile_cr, 0, 1)
+        # (Car Racing tile removed)
 
         lay.addLayout(grid)
         lay.addStretch(1)
