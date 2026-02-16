@@ -86,8 +86,8 @@ class PlotManager:
         self.ax_detail.set_title("Força (N) x Tempo", color=fg)
         self.ax_detail.set_xlabel("Tempo (s)", color=fg)
         self.ax_detail.set_ylabel("Força (N)", color=fg)
-        # Limitar força em 0..10 N conforme solicitação
-        self.ax_detail.set_ylim(0, 10)
+        # Limitar força em 0..5 N (ajuste solicitado)
+        self.ax_detail.set_ylim(0, 5)
 
     def update(self, current_time, latest_readings):
         self.time_history.append(current_time)

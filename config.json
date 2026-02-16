@@ -3,13 +3,13 @@
   "bleServiceUuid": "abcdef01-1234-5678-1234-56789abcdef0",
   "lastLoadCellPort": "COM12",
   "sensorMapping": {
-    "interfalangica_polegar": "flex3",
-    "proximal_indicador": "flex5",
-    "metacarpofalangica_medio": "flex6",
-    "proximal_medio": "Nenhum",
-    "metacarpofalangica_anelar": "flex4",
-    "metacarpofalangica_indicador": "flex2",
-    "metacarpofalangica_minimo": "flex7"
+    "interfalangica_polegar": "flex1",
+    "proximal_indicador": "flex6",
+    "metacarpofalangica_medio": "flex4",
+    "proximal_medio": "flex5",
+    "metacarpofalangica_anelar": "flex3",
+    "metacarpofalangica_indicador": "flex7",
+    "metacarpofalangica_minimo": "flex2"
   },
   "flybird_selected_articulation": "proximal_indicador",
   "carracing_selected_articulation": "interfalangica_polegar"

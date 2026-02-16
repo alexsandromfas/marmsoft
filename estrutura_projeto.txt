@@ -1,0 +1,107 @@
+MarmSoft - Estrutura do projeto
+
+Arquivos e pastas no diretório raiz:
+- bugs_e_melhorias.txt    # Lista de bugs e melhorias
+- config.json             # Arquivo de configuração do projeto
+- LICENSE                 # Licença do projeto
+- main.py                 # Entry point principal (UI PyQt6)
+- main.spec               # Arquivo de especificação para build (PyInstaller)
+- Readme.txt              # Informações gerais
+- requirements.txt        # Dependências do projeto
+- assets/                 # Recursos gerais do projeto (imagens, ícones, etc.)
+    ├── Mao/              # Recursos de sobreposição da mão (usado em jogos/exemplos)
+    └── Nova pasta/       # Arquivos de projeto/pdn de exemplo
+
+- calibracao_fsr/         # Dados brutos e scripts relacionados ao FSR e calibração
+    ├── bruto_1.csv
+    ├── etl_forca
+    ├── fsr_sintetico.csv
+    ├── Specimen_DadosEmBruto_1.csv
+    ├── calibra_fsr/     # CSVs de calibração do FSR
+    │   ├── calibra_fsr1.csv
+    │   ├── calibra_fsr2.csv
+    │   ├── calibra_fsr3.csv
+    │   ├── calibra_fsr4.csv
+    │   └── ...
+    ├── Nova pasta/
+    ├── old/
+    └── teste 01 18.09/
+
+- ensaios do lab 18.09/   # Pastas de ensaios organizadas por data
+    └── ensaio 2/
+    └── Ensaio Mão 1/
+
+- forca_tratados/         # Arquivos de força processados/tratados
+    ├── forca_fsr1.csv
+    ├── forca_fsr3.csv
+    ├── Specimen_DadosEmBruto_1_tratado.csv
+    └── old/
+
+- gravacoes_fsr/          # Gravações de FSR (raw)
+
+- calibrations/           # Pasta principal de calibrations (flex/fsr)
+    ├── flex/             # Calibrações de flex sensors
+    │   ├── calibration_flex1.csv
+    │   ├── calibration_flex2.csv
+    │   └── ...
+    └── fsr/              # Calibrações de FSR (pode conter muitos CSVs)
+
+- Car Racing 2d/          # Jogo Car Racing (pygame)
+    ├── config.json
+    ├── main.py
+    ├── objects.py
+    ├── README.md
+    ├── Assets/           # Imagens do jogo
+    ├── Sounds/           # Sons do jogo
+    └── __pycache__/
+
+- data_tests/             # Arquivos de teste de dados (vários CSVs de sensores)
+
+- Docs/                   # Documentação e anotações
+    └── melhorias a ser feita..txt
+
+- "Firmware do ESP32"/   # Firmware e notas para ESP32 usado no projeto
+    ├── Marms_Esp32_FW_v4_0_FSR_corrigido.txt
+    └── Marms_Esp32_FW_v4_0_FSR/ (cópias e versões)
+
+- FlyBird/                # Jogo FlyBird (pygame)
+    ├── __init__.py
+    ├── main_fb.py
+    ├── readme.txt
+    ├── assets/
+    ├── data/
+    └── modules/
+
+- gravacoes_fsr/          # Outra pasta de gravações (possui CSVs com timestamps)
+
+- Jogos/                  # Coleção de jogos ou demos (ex: Python-Games-master)
+    └── Python-Games-master/
+
+- Modules/                # Código principal do projeto (módulos reutilizáveis)
+    ├── __init__.py
+    ├── ble_manager.py            # Gerencia BLE (usa bleak)
+    ├── descobrir_dispositivos.py # Ferramentas BLE
+    ├── flex_calibrador.py        # Calibração de sensores flex
+    ├── fsr_calibrador.py         # Calibração e ajuste do FSR (usa numpy, opcional scipy)
+    ├── goniometer_manager.py    # Integração com goniômetro (DLL)
+    ├── gui_manager.py           # GUI antiga (CustomTkinter) - legado
+    ├── load_cell_manager.py     # Leitura de célula de carga (pyserial)
+    ├── mapeamento_sensores.py   # Visualização/mapeamento dos sensores (PyQt6)
+    ├── plot_manager.py         # Abstração de plots (matplotlib + Qt)
+    ├── sensor_data.py          # Classes de dados e aplicação de calibração
+    ├── tests.py                # Utilitários de teste/plots (Tkinter/customtkinter)
+    ├── ui_manager.py           # UI principal (PyQt6) - arquivo grande
+    ├── ui_manager_legacy/      # Possível pasta legacy (se presente)
+    └── legacy/                 # Código legado (customtkinter, Tkinter helpers)
+
+- tests/                  # Scripts de teste e exemplos
+    ├── force_clean.py
+    ├── scale_realtime.py   # Exemplo de plot em tempo real (pyserial, matplotlib, numpy)
+    └── teste_ui.py
+
+Observações gerais:
+- Muitos arquivos de calibração e gravações estão em CSV espalhados por pastas (`calibrations/`, `calibracao_fsr/`, `forca_tratados/`).
+- A UI principal atual é implementada em `Modules/ui_manager.py` usando `PyQt6` e integra `PlotManager`, `BLEManager`, `LoadCellManager` e os calibradores.
+- Existem módulos legados/alternativos (CustomTkinter/Tkinter) sob `Modules/legacy` e `gui_manager.py`; embora não sejam usados pela UI PyQt6 atual, ainda estão no repositório.
+- Jogos (`FlyBird`, `Car Racing 2d`) usam `pygame` e têm suas próprias pastas `Assets` e `Sounds`.
+- `requirements.txt` lista dependências como `PyQt6`, `numpy`, `matplotlib`, `pygame`, `bleak`, `pyserial`, `customtkinter`, `scipy` (opcional), `requests`, `PyYAML`.

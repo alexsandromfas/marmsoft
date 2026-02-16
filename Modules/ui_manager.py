@@ -1724,7 +1724,7 @@ class CalibrationPage(QWidget):
             ax.plot(t, fc, label='Força Calculada', color='#ff9800')
             ax.set_xlim(min(t), max(t))
         ax.set_xlabel('Tempo (s)'); ax.set_ylabel('Força (N)'); ax.set_title('Aferição FSR')
-        ax.set_ylim(0, 10)
+        ax.set_ylim(0, 5)
         theme = self._get_theme(); dark = (theme == 'Dark')
         bg = '#1A1F27' if dark else '#ffffff'; fg = '#ffffff' if dark else '#1e1e1e'; grid = '#2d3640' if dark else '#d5dbe2'; spine = '#4a525c' if dark else '#b7c2cc'
         self.fsr_eval_fig.patch.set_facecolor(bg)

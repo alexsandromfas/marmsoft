@@ -180,7 +180,7 @@ class PlotManager:
             self.line_goniometer_angle.set_visible(False)
 
             # Ajustar limite do eixo de força
-            self.ax_detail.set_ylim(0, 10)
+            self.ax_detail.set_ylim(0, 5)
 
         # Atualizar legendas
         visible_handles = []

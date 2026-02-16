@@ -412,5 +412,68 @@
     "AmplitudeMax": 64.76,
     "Obstaculos": 68,
     "VelocidadeMax": 2.83
+  },
+  {
+    "Nome": "Monica",
+    "Articulacao": "Proximal Indicador",
+    "AnguloFlexMax": 215.34,
+    "AnguloExtMin": 194.69,
+    "AmplitudeMax": 20.65,
+    "Obstaculos": 1,
+    "VelocidadeMax": 1.0
+  },
+  {
+    "Nome": "Monica",
+    "Articulacao": "Proximal Indicador",
+    "AnguloFlexMax": 217.11,
+    "AnguloExtMin": 194.69,
+    "AmplitudeMax": 22.42,
+    "Obstaculos": 10,
+    "VelocidadeMax": 1.0
+  },
+  {
+    "Nome": "monica",
+    "Articulacao": "Proximal Indicador",
+    "AnguloFlexMax": 218.33,
+    "AnguloExtMin": 189.11,
+    "AmplitudeMax": 29.22,
+    "Obstaculos": 14,
+    "VelocidadeMax": 1.0
+  },
+  {
+    "Nome": "Shigueharu",
+    "Articulacao": "Proximal Indicador",
+    "AnguloFlexMax": 233.53,
+    "AnguloExtMin": 199.55,
+    "AmplitudeMax": 33.98,
+    "Obstaculos": 17,
+    "VelocidadeMax": 1.0
+  },
+  {
+    "Nome": "Shigueharu",
+    "Articulacao": "Proximal Indicador",
+    "AnguloFlexMax": 233.18,
+    "AnguloExtMin": 198.51,
+    "AmplitudeMax": 34.67,
+    "Obstaculos": 13,
+    "VelocidadeMax": 1.0
+  },
+  {
+    "Nome": "Shigueharu",
+    "Articulacao": "Proximal Indicador",
+    "AnguloFlexMax": 233.18,
+    "AnguloExtMin": 198.51,
+    "AmplitudeMax": 34.67,
+    "Obstaculos": 12,
+    "VelocidadeMax": 1.0
+  },
+  {
+    "Nome": "Shigueharu",
+    "Articulacao": "Proximal Indicador",
+    "AnguloFlexMax": 233.43,
+    "AnguloExtMin": 200.96,
+    "AmplitudeMax": 32.46,
+    "Obstaculos": 4,
+    "VelocidadeMax": 1.0
   }
 ]
