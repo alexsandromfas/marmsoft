@@ -475,5 +475,14 @@
     "AmplitudeMax": 32.46,
     "Obstaculos": 4,
     "VelocidadeMax": 1.0
+  },
+  {
+    "Nome": "mkmk[",
+    "Articulacao": "Proximal Indicador",
+    "AnguloFlexMax": 207.25,
+    "AnguloExtMin": 203.19,
+    "AmplitudeMax": 4.06,
+    "Obstaculos": 2,
+    "VelocidadeMax": 1.0
   }
 ]
