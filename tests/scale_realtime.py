@@ -13,6 +13,9 @@ Features:
     t : send 't' to Arduino to tare
     q or ESC : quit
 - Basic stats (min/mean/max, last value) displayed in plot title
+teste
+teste
+teste
 
 Usage (from repository root):
     python -m tests.scale_realtime           # uses COM9
