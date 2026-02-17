@@ -124,14 +124,13 @@ class Screens:
             t = lb_row_font.render(line, True, WHITE)
             self.screen.blit(t, (right_x, y_lb + i * 22))
 
-        # Buttons
+        # Buttons - Apenas: Jogar Novamente, Salvar Dados, Sair
         buttons = []
-        button_texts = ["Jogar Novamente", "Trocar Paciente", "Sair"]
-        button_actions = [self.game.play_again, self.game.change_patient, self.game.quit_game]
+        button_texts = ["Jogar Novamente", "Salvar Dados", "Sair"]
+        button_actions = [self.game.play_again, self.game.save_results, self.game.quit_game]
         button_width = 200
         button_height = 50
         button_margin = 20
-        total_height = len(button_texts) * (button_height + button_margin) - button_margin
         # Position buttons near the bottom
         start_y = HEIGHT - button_height - 30
 
@@ -143,7 +142,17 @@ class Screens:
             buttons.append((rect, text, button_actions[i]))
 
         waiting = True
+        data_saved = False  # Flag para feedback visual
+        save_feedback_timer = 0
+        
         while waiting:
+            # Verifica se display ainda existe antes de continuar
+            try:
+                if not pygame.display.get_init():
+                    break
+            except Exception:
+                break
+            
             self.clock.tick(FPS)
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
@@ -153,61 +162,75 @@ class Screens:
                     mouse_pos = event.pos
                     for rect, text, action in buttons:
                         if rect.collidepoint(mouse_pos):
-                            action()
-                            waiting = False
+                            if text == "Salvar Dados":
+                                if not data_saved:  # Só salva uma vez
+                                    action()
+                                    data_saved = True
+                                    save_feedback_timer = pygame.time.get_ticks()
+                                # Não sai do loop, apenas mostra feedback
+                            elif text == "Sair":
+                                action()
+                                waiting = False
+                            elif text == "Jogar Novamente":
+                                action()
+                                waiting = False
                             break
 
             # Redraw the screen elements
-            self.screen.fill(BLACK)
-            # Redraw static content
-            # Redraw static content
-            self.screen.fill(BLACK)
-            self.screen.blit(game_over_text, (20, 20))
-            for i, line in enumerate(summary_lines):
-                t = info_font.render(line, True, WHITE)
-                self.screen.blit(t, (left_x, left_y + i * 24))
-            self.screen.blit(title_lb, (right_x, 80))
-            for i, rec in enumerate(leaderboard):
-                line = f"{i+1:>2}. {rec['Nome']} — {rec['Articulacao']} — Obs: {rec['Obstaculos']}  Vel: {rec['VelocidadeMax']:.2f}x  Amp: {rec['AmplitudeMax']:.1f}°"
-                t = lb_row_font.render(line, True, WHITE)
-                self.screen.blit(t, (right_x, y_lb + i * 22))
+            try:
+                self.screen.fill(BLACK)
+                self.screen.blit(game_over_text, (20, 20))
+                for i, line in enumerate(summary_lines):
+                    t = info_font.render(line, True, WHITE)
+                    self.screen.blit(t, (left_x, left_y + i * 24))
+                self.screen.blit(title_lb, (right_x, 80))
+                for i, rec in enumerate(leaderboard):
+                    line = f"{i+1:>2}. {rec['Nome']} — {rec['Articulacao']} — Obs: {rec['Obstaculos']}  Vel: {rec['VelocidadeMax']:.2f}x  Amp: {rec['AmplitudeMax']:.1f}°"
+                    t = lb_row_font.render(line, True, WHITE)
+                    self.screen.blit(t, (right_x, y_lb + i * 22))
 
-            for rect, text, _ in buttons:
-                pygame.draw.rect(self.screen, WHITE, rect)
-                button_text = font_small.render(text, True, BLACK)
-                text_rect = button_text.get_rect(center=rect.center)
-                self.screen.blit(button_text, text_rect)
+                for rect, text, _ in buttons:
+                    # Muda cor do botão "Salvar Dados" se já foi salvo
+                    if text == "Salvar Dados" and data_saved:
+                        pygame.draw.rect(self.screen, (100, 200, 100), rect)  # Verde
+                        saved_text = font_small.render("✓ Dados Salvos", True, BLACK)
+                        text_rect = saved_text.get_rect(center=rect.center)
+                        self.screen.blit(saved_text, text_rect)
+                    else:
+                        pygame.draw.rect(self.screen, WHITE, rect)
+                        button_text = font_small.render(text, True, BLACK)
+                        text_rect = button_text.get_rect(center=rect.center)
+                        self.screen.blit(button_text, text_rect)
 
-            pygame.display.flip()
+                pygame.display.flip()
+            except pygame.error:
+                break  # Display foi fechado
 
     
     def get_player_name(self):
-        """Prompt the player to enter their name."""
+        """Exibe o nome do paciente da sessão clínica (somente leitura)."""
         font_small = pygame.font.Font(None, 36)
-        name_prompt = font_small.render("Digite seu nome:", True, WHITE)
-        input_box = pygame.Rect(WIDTH // 2 - 150, HEIGHT // 2 - 20, 300, 40)
-        name_text = ''
-        active = True
-        cursor_visible = True
-        cursor_timer = 0
-        cursor_interval = 500  # milliseconds
-
-        # Next button
-        next_button = pygame.Rect(WIDTH // 2 - 50, input_box.bottom + 20, 100, 40)
+        font_large = pygame.font.Font(None, 48)
+        
+        # Nome do paciente vem da sessão clínica
+        patient_name = self.game.player_name if self.game.player_name else 'Paciente não identificado'
+        
+        # Título
+        title_text = font_large.render("Paciente da Sessão", True, WHITE)
+        name_surface = font_small.render(patient_name, True, WHITE)
+        
+        # Botão Próximo
+        next_button = pygame.Rect(WIDTH // 2 - 75, HEIGHT // 2 + 80, 150, 50)
         next_button_text = font_small.render("Próximo", True, BLACK)
-
+        
         # Speed ramp checkbox
         checkbox_label = pygame.font.Font(None, 28).render("Aumento de velocidade", True, WHITE)
         cb_size = 22
-        cb_rect = pygame.Rect(input_box.left, input_box.bottom + 70, cb_size, cb_size)
+        cb_rect = pygame.Rect(WIDTH // 2 - 120, HEIGHT // 2 + 20, cb_size, cb_size)
         cb_checked = getattr(self.game, 'speed_ramp_enabled', False)
-
+        
+        active = True
         while active:
-            current_time = pygame.time.get_ticks()
-            if current_time - cursor_timer > cursor_interval:
-                cursor_visible = not cursor_visible
-                cursor_timer = current_time
-
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     active = False
@@ -215,51 +238,34 @@ class Screens:
                     return
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_RETURN:
-                        if name_text.strip() != '':
-                            active = False
-                            self.game.player_name = name_text
-                            # store checkbox state
-                            self.game.speed_ramp_enabled = bool(cb_checked)
-                            return
-                    elif event.key == pygame.K_BACKSPACE:
-                        name_text = name_text[:-1]
-                    else:
-                        name_text += event.unicode
+                        self.game.speed_ramp_enabled = bool(cb_checked)
+                        return
                 if event.type == pygame.MOUSEBUTTONDOWN:
                     mouse_pos = event.pos
                     if next_button.collidepoint(mouse_pos):
-                        if name_text.strip() != '':
-                            active = False
-                            self.game.player_name = name_text
-                            self.game.speed_ramp_enabled = bool(cb_checked)
-                            return
-                    # Toggle checkbox
+                        self.game.speed_ramp_enabled = bool(cb_checked)
+                        return
                     if cb_rect.collidepoint(mouse_pos):
                         cb_checked = not cb_checked
-
+            
             self.screen.fill(BLACK)
-            self.screen.blit(name_prompt, (WIDTH // 2 - name_prompt.get_width() // 2, HEIGHT // 2 - 80))
-            pygame.draw.rect(self.screen, WHITE, input_box, 2)
-            name_surface = font_small.render(name_text, True, WHITE)
-            self.screen.blit(name_surface, (input_box.x + 5, input_box.y + 5))
-
-            # Blinking cursor
-            if cursor_visible:
-                cursor_rect = pygame.Rect(input_box.x + 5 + name_surface.get_width(), input_box.y + 5, 2, name_surface.get_height())
-                pygame.draw.rect(self.screen, WHITE, cursor_rect)
-
-            # Draw Next button
-            pygame.draw.rect(self.screen, WHITE, next_button)
-            text_rect = next_button_text.get_rect(center=next_button.center)
-            self.screen.blit(next_button_text, text_rect)
-
-            # Draw speed ramp checkbox and label
+            
+            # Exibe título e nome
+            self.screen.blit(title_text, (WIDTH // 2 - title_text.get_width() // 2, HEIGHT // 2 - 80))
+            self.screen.blit(name_surface, (WIDTH // 2 - name_surface.get_width() // 2, HEIGHT // 2 - 20))
+            
+            # Checkbox de velocidade
             pygame.draw.rect(self.screen, WHITE, cb_rect, 2)
             if cb_checked:
                 inner = cb_rect.inflate(-6, -6)
                 pygame.draw.rect(self.screen, WHITE, inner)
             self.screen.blit(checkbox_label, (cb_rect.right + 10, cb_rect.top - 4))
-
+            
+            # Botão Próximo
+            pygame.draw.rect(self.screen, WHITE, next_button)
+            text_rect = next_button_text.get_rect(center=next_button.center)
+            self.screen.blit(next_button_text, text_rect)
+            
             pygame.display.flip()
             self.clock.tick(30)
 

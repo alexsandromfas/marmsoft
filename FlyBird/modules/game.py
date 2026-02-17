@@ -14,13 +14,19 @@ from FlyBird.modules.screens import Screens
 class Game:
     """Main game class handling state, events and rendering."""
 
-    def __init__(self, sensor_data_provider=None):
+    def __init__(self, sensor_data_provider=None, player_name=None, patient_id=None, session_id=None):
         """Initialize pygame and load assets.
 
         Parameters
         ----------
         sensor_data_provider : Callable[[], float], optional
             Function returning the current flex sensor angle.
+        player_name : str, optional
+            Pre-defined player name (from clinical session).
+        patient_id : str, optional
+            Patient ID for data saving.
+        session_id : str, optional
+            Session ID for data attribution.
         """
         pygame.init()
         self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
@@ -47,7 +53,10 @@ class Game:
         self.max_speed_factor = 1.0
 
         self.load_data()
-        self.player_name = ""
+        # Clinical session data
+        self.player_name = player_name or ""
+        self.patient_id = patient_id or ""
+        self.session_id = session_id or ""
         self.selected_finger = ""
         self.screens = Screens(self)
         self.started = False  # Use this flag if necessary
@@ -457,6 +466,39 @@ class Game:
             pass
 
         print("Resultados salvos (JSON).")
+        
+        # Salvar no CSV do paciente (se houver sessão clínica ativa)
+        if self.patient_id and self.session_id:
+            self._save_to_patient_csv(rec)
+
+    def _save_to_patient_csv(self, rec: dict):
+        """Salva resultados do jogo no CSV do paciente."""
+        import datetime
+        try:
+            patient_dir = "Pacientes"
+            game_results_file = os.path.join(patient_dir, f"{self.patient_id}_flybird.csv")
+            
+            # Adiciona timestamp e session_id
+            rec_with_meta = {
+                'timestamp': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'session_id': self.session_id,
+                **rec
+            }
+            
+            fieldnames = ['timestamp', 'session_id', 'Nome', 'Articulacao', 
+                         'AnguloFlexMax', 'AnguloExtMin', 'AmplitudeMax', 
+                         'Obstaculos', 'VelocidadeMax']
+            
+            file_exists = os.path.isfile(game_results_file)
+            with open(game_results_file, 'a', newline='', encoding='utf-8') as csvfile:
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                if not file_exists or os.path.getsize(game_results_file) == 0:
+                    writer.writeheader()
+                writer.writerow(rec_with_meta)
+            
+            print(f"Resultados salvos no arquivo do paciente: {game_results_file}")
+        except Exception as e:
+            print(f"Erro ao salvar no CSV do paciente: {e}")
 
     def play_again(self):
         """Start a new game using the same player."""

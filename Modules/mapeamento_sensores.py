@@ -130,10 +130,13 @@ class ArticulationItem(QGraphicsPixmapItem):
 
 
 class HandOverlayWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, patient_id: str = None, session_id: str = None):
         super().__init__()
         self.setWindowTitle('Mapeamento de Sensores')
         self.resize(1100, 700)
+        # Dados da sessão clínica (opcional)
+        self.patient_id = patient_id
+        self.session_id = session_id
         # Proíbe maximização desta janela (remove botão de maximizar)
         self.setWindowFlag(Qt.WindowType.WindowMaximizeButtonHint, False)
         # Estilo de janela não redimensionável no Windows
@@ -380,8 +383,9 @@ class HandOverlayWindow(QMainWindow):
             self.mapping = {}
 
     def _save_config_mapping(self):
+        import json
+        # Salva no config.json global
         try:
-            import json
             cfg = {}
             try:
                 with open(self._config_path(), 'r', encoding='utf-8') as f:
@@ -391,6 +395,30 @@ class HandOverlayWindow(QMainWindow):
             cfg['sensorMapping'] = self.mapping
             with open(self._config_path(), 'w', encoding='utf-8') as f:
                 json.dump(cfg, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+        
+        # Se tiver sessão de paciente ativa, salva no arquivo de mapeamento do paciente
+        if self.patient_id:
+            self._save_patient_mapping()
+    
+    def _save_patient_mapping(self):
+        """Salva o mapeamento de sensores no arquivo do paciente."""
+        import json
+        import datetime
+        try:
+            patient_dir = "Pacientes"
+            mapping_file = os.path.join(patient_dir, f"{self.patient_id}_mapping.json")
+            
+            data = {
+                'patient_id': self.patient_id,
+                'session_id': self.session_id or '',
+                'updated_at': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'sensor_mapping': self.mapping
+            }
+            
+            with open(mapping_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception:
             pass
 

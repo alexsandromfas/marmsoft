@@ -29,10 +29,20 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QTextEdit, QLabel, QFrame, QGraphicsDropShadowEffect, QToolButton, QCheckBox,
     QProgressBar, QPushButton, QComboBox, QSpinBox, QFormLayout, QLineEdit,
-    QTableView, QListWidget, QListWidgetItem, QMessageBox, QStackedWidget, QSlider
+    QTableView, QListWidget, QListWidgetItem, QMessageBox, QStackedWidget, QSlider,
+    QTableWidget, QTableWidgetItem, QAbstractItemView
 )
 import json
 import csv
+
+# Import clinical management module
+from Modules.clinical_manager import (
+    ClinicalOverlay, SessionData,
+    load_therapists, list_patients, load_patient, save_patient,
+    open_session, close_session, get_patient_sessions,
+    PatientData, Therapist, EditPatientDialog, EditTherapistDialog,
+    load_recent_sessions, trim_sessions_history
+)
 
 
 # ------------------ Dataclasses ------------------
@@ -1892,33 +1902,109 @@ class GamesPage(QWidget):
         lay.addStretch(1)
 
 class HistoryModel(QAbstractTableModel):
+    """Model para exibir histórico das últimas 20 sessões."""
+    headers = ["Data", "Hora", "Paciente", "Terapeuta", "Duração", "Status"]
+    
     def __init__(self):
         super().__init__()
-        self.rows = [
-            {"id":"sess_001","inicio":"10:00","paciente":"Demo","tipo":"Teste","amostras":120},
-            {"id":"sess_002","inicio":"10:05","paciente":"Demo","tipo":"Jogo","amostras":340},
-        ]
-    def rowCount(self, parent=QModelIndex()): return len(self.rows)
-    def columnCount(self, parent=QModelIndex()): return 5
+        self.sessions: List[SessionData] = []
+        self.patient_names: dict = {}  # Cache de nomes por ID
+    
+    def refresh(self):
+        """Recarrega dados das sessões."""
+        self.beginResetModel()
+        self.sessions = load_recent_sessions(20)
+        # Carrega nomes dos pacientes
+        self.patient_names = {}
+        for s in self.sessions:
+            if s.patient_id and s.patient_id not in self.patient_names:
+                patient = load_patient(s.patient_id)
+                self.patient_names[s.patient_id] = patient.nome if patient else s.patient_id
+        self.endResetModel()
+    
+    def rowCount(self, parent=QModelIndex()): 
+        return len(self.sessions)
+    
+    def columnCount(self, parent=QModelIndex()): 
+        return len(self.headers)
+    
     def data(self, index, role=Qt.ItemDataRole.DisplayRole):
-        if not index.isValid(): return QVariant()
-        cols = ["id","inicio","paciente","tipo","amostras"]
-        if role==Qt.ItemDataRole.DisplayRole:
-            return str(self.rows[index.row()][cols[index.column()]])
+        if not index.isValid(): 
+            return QVariant()
+        
+        s = self.sessions[index.row()]
+        col = index.column()
+        
+        if role == Qt.ItemDataRole.DisplayRole:
+            # Extrai data e hora do start_time (formato: YYYY-MM-DD HH:MM:SS)
+            dt_parts = s.start_time.split(' ') if s.start_time else ['', '']
+            date_str = dt_parts[0] if len(dt_parts) > 0 else ''
+            time_str = dt_parts[1][:5] if len(dt_parts) > 1 and len(dt_parts[1]) >= 5 else ''
+            
+            # Formata data para DD/MM/YYYY
+            if date_str and len(date_str) == 10:
+                parts = date_str.split('-')
+                if len(parts) == 3:
+                    date_str = f"{parts[2]}/{parts[1]}/{parts[0]}"
+            
+            patient_name = self.patient_names.get(s.patient_id, s.patient_id)
+            status = "Concluída" if s.end_time else "Em andamento"
+            
+            values = [date_str, time_str, patient_name, s.therapist_nome, s.duracao or "-", status]
+            return values[col]
+        
         return QVariant()
+    
     def headerData(self, section, orientation, role):
-        if role==Qt.ItemDataRole.DisplayRole and orientation==Qt.Orientation.Horizontal:
-            return ["ID","Início","Paciente","Tipo","Amostras"][section]
+        if role == Qt.ItemDataRole.DisplayRole and orientation == Qt.Orientation.Horizontal:
+            return self.headers[section]
         return QVariant()
 
+
 class HistoryPage(QWidget):
+    """Página de histórico mostrando as últimas 20 sessões."""
     def __init__(self):
         super().__init__()
+        from PyQt6.QtWidgets import QHeaderView
+        
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("Histórico de Sessões"))
-        self.table = QTableView(); self.model = HistoryModel(); self.table.setModel(self.model)
-        layout.addWidget(self.table)
-        layout.addStretch()
+        layout.setSpacing(14)
+        
+        # Header
+        header = QHBoxLayout()
+        title = QLabel("Histórico de Sessões")
+        title.setProperty("class", "section-title")
+        self.btn_refresh = QPushButton("🔄 Atualizar")
+        self.btn_refresh.clicked.connect(self.refresh_data)
+        header.addWidget(title)
+        header.addStretch()
+        header.addWidget(self.btn_refresh)
+        layout.addLayout(header)
+        
+        # Info
+        self.info_label = QLabel("Últimas 20 sessões realizadas")
+        self.info_label.setStyleSheet("color: #8b97a6; font-size: 12px;")
+        layout.addWidget(self.info_label)
+        
+        # Tabela
+        self.table = QTableView()
+        self.model = HistoryModel()
+        self.table.setModel(self.model)
+        self.table.setAlternatingRowColors(True)
+        self.table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QTableView.SelectionMode.SingleSelection)
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        layout.addWidget(self.table, 1)
+        
+        # Carrega dados iniciais
+        self.refresh_data()
+    
+    def refresh_data(self):
+        """Atualiza a lista de sessões."""
+        self.model.refresh()
+        count = len(self.model.sessions)
+        self.info_label.setText(f"{count} sessões no histórico")
 
 class PatientsTableModel(QAbstractTableModel):
     headers = ["ID","Nome","Idade","Sexo","Condição","Fisioterapeuta","Registro"]
@@ -1969,33 +2055,42 @@ class PatientsFilterProxy(QSortFilterProxyModel):
         return True
 
 class PatientsPage(QWidget):
-    def __init__(self, patients: List[Patient]):
+    """Página de pacientes carregada a partir dos arquivos CSV."""
+    def __init__(self, patients: List[Patient] = None):
         super().__init__()
         from PyQt6.QtWidgets import QHeaderView
-        self._patients = patients
         lay = QVBoxLayout(self); lay.setSpacing(14)
-        title = QLabel("Pacientes"); title.setProperty("class","section-title"); lay.addWidget(title)
+        
+        # Header com título e botões
+        header = QHBoxLayout()
+        title = QLabel("Pacientes"); title.setProperty("class","section-title")
+        self.btn_edit = QPushButton("✏️ Editar")
+        self.btn_edit.clicked.connect(self._edit_selected)
+        self.btn_edit.setEnabled(False)
+        self.btn_refresh = QPushButton("🔄 Atualizar")
+        self.btn_refresh.clicked.connect(self.refresh_data)
+        header.addWidget(title)
+        header.addStretch()
+        header.addWidget(self.btn_edit)
+        header.addWidget(self.btn_refresh)
+        lay.addLayout(header)
 
         # Filtros / busca
         filter_bar = QHBoxLayout(); filter_bar.setSpacing(8)
-        self.search_edit = QLineEdit(); self.search_edit.setPlaceholderText("Pesquisar nome, condição, fisio...")
-        self.cb_fisio = QComboBox(); fisios = sorted({p.fisio for p in patients}); self.cb_fisio.addItems(["Todos"] + fisios)
-        self.cb_cond = QComboBox(); conds = sorted({p.condicao for p in patients}); self.cb_cond.addItems(["Todos"] + conds)
-        self.cb_sexo = QComboBox(); sexos = sorted({p.sexo for p in patients}); self.cb_sexo.addItems(["Todos"] + sexos)
+        self.search_edit = QLineEdit(); self.search_edit.setPlaceholderText("Pesquisar nome, condição...")
         filter_bar.addWidget(QLabel("Buscar:")); filter_bar.addWidget(self.search_edit,1)
-        filter_bar.addWidget(QLabel("Fisio:")); filter_bar.addWidget(self.cb_fisio)
-        filter_bar.addWidget(QLabel("Condição:")); filter_bar.addWidget(self.cb_cond)
-        filter_bar.addWidget(QLabel("Sexo:")); filter_bar.addWidget(self.cb_sexo)
         lay.addLayout(filter_bar)
 
-        # Tabela com proxy
-        self.model = PatientsTableModel(patients)
-        self.proxy = PatientsFilterProxy(); self.proxy.setSourceModel(self.model)
-        self.table = QTableView(); self.table.setModel(self.proxy)
+        # Tabela
+        self.table = QTableWidget()
+        self.table.setColumnCount(7)
+        self.table.setHorizontalHeaderLabels(["ID", "Nome", "Idade", "Sexo", "Condição", "Terapeuta", "Contato"])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.table.setAlternatingRowColors(True)
         self.table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QTableView.SelectionMode.SingleSelection)
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.itemSelectionChanged.connect(self._selection_changed)
         lay.addWidget(self.table, 4)
 
         # Painel de detalhes
@@ -2007,86 +2102,274 @@ class PatientsPage(QWidget):
         df_lay.addWidget(self.detail_info)
         lay.addWidget(self.detail_frame, 2)
 
-        # Conexões
-        self.search_edit.textChanged.connect(self._apply_filters)
-        self.cb_fisio.currentTextChanged.connect(self._apply_filters)
-        self.cb_cond.currentTextChanged.connect(self._apply_filters)
-        self.cb_sexo.currentTextChanged.connect(self._apply_filters)
-        self.table.selectionModel().selectionChanged.connect(self._selection_changed)
-        self._apply_filters()
+        # Conexões filtro
+        self.search_edit.textChanged.connect(self._filter_table)
+        
+        # Armazena dados carregados
+        self._patients_data: List[PatientData] = []
+        
+        # Carrega dados iniciais
+        self.refresh_data()
 
-    def _apply_filters(self):
-        self.proxy.set_filters(self.search_edit.text(), self.cb_fisio.currentText(), self.cb_cond.currentText(), self.cb_sexo.currentText())
-        # Limpa detalhe se item atual não passa mais no filtro
-        self._update_detail_from_selection()
+    def refresh_data(self):
+        """Recarrega dados dos pacientes do CSV."""
+        self._patients_data = list_patients()
+        self._populate_table()
+    
+    def _populate_table(self):
+        """Popula tabela com os dados carregados."""
+        self.table.setRowCount(0)
+        for p in self._patients_data:
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+            self.table.setItem(row, 0, QTableWidgetItem(p.id))
+            self.table.setItem(row, 1, QTableWidgetItem(p.nome))
+            self.table.setItem(row, 2, QTableWidgetItem(str(p.idade)))
+            self.table.setItem(row, 3, QTableWidgetItem(p.sexo))
+            self.table.setItem(row, 4, QTableWidgetItem(p.condicao))
+            self.table.setItem(row, 5, QTableWidgetItem(p.terapeuta))
+            self.table.setItem(row, 6, QTableWidgetItem(p.contato))
+    
+    def _filter_table(self, text: str):
+        """Filtra linhas da tabela."""
+        text_lower = text.lower()
+        for row in range(self.table.rowCount()):
+            match = False
+            for col in range(self.table.columnCount()):
+                item = self.table.item(row, col)
+                if item and text_lower in item.text().lower():
+                    match = True
+                    break
+            self.table.setRowHidden(row, not match if text else False)
 
-    def _selection_changed(self, *_):
-        self._update_detail_from_selection()
-
-    def _update_detail_from_selection(self):
-        indexes = self.table.selectionModel().selectedRows()
-        if not indexes:
+    def _selection_changed(self):
+        """Atualiza painel de detalhes."""
+        rows = self.table.selectionModel().selectedRows()
+        if not rows:
             self.detail_title.setText("Selecione um paciente")
             self.detail_info.setPlainText("")
+            self.btn_edit.setEnabled(False)
             return
-        proxy_index = indexes[0]
-        source_index = self.proxy.mapToSource(proxy_index)
-        patient = self.model.patient_at(source_index.row())
-        if not patient:
+        
+        row = rows[0].row()
+        if row < 0 or row >= len(self._patients_data):
+            self.btn_edit.setEnabled(False)
             return
-        self.detail_title.setText(f"{patient.nome} (ID: {patient.id})")
-        # Simulated history placeholder
-        history_placeholder = "\n".join([
-            "Histórico (demo):",
-            "- Sessão 01: Avaliação inicial",
-            "- Sessão 02: Exercícios de amplitude",
-            "- Sessão 03: Jogo de reabilitação"
-        ])
+        
+        self.btn_edit.setEnabled(True)
+        p = self._patients_data[row]
+        self.detail_title.setText(f"{p.nome} (ID: {p.id})")
+        
+        # Carrega sessões do paciente
+        sessions = get_patient_sessions(p.id)
+        sessions_text = "\nSessões realizadas:\n"
+        if sessions:
+            for s in sessions[-5:]:  # Últimas 5 sessões
+                status = "concluída" if s.end_time else "em andamento"
+                sessions_text += f"  - {s.start_time[:10]} ({s.duracao or status})\n"
+        else:
+            sessions_text += "  Nenhuma sessão registrada\n"
+        
+        # Carrega resultados do FlyBird
+        flybird_text = "\nResultados FlyBird:\n"
+        flybird_results = self._load_flybird_results(p.id)
+        if flybird_results:
+            for r in flybird_results[-5:]:  # Últimos 5 resultados
+                flybird_text += f"  - {r.get('timestamp', 'N/A')[:16]} | Obs: {r.get('Obstaculos', 0)} | Amp: {r.get('AmplitudeMax', 0)}°\n"
+        else:
+            flybird_text += "  Nenhum resultado registrado\n"
+        
         info = (
-            f"Nome: {patient.nome}\n"
-            f"Idade: {patient.idade}\n"
-            f"Sexo: {patient.sexo}\n"
-            f"Condição: {patient.condicao}\n"
-            f"Fisioterapeuta: {patient.fisio}\n"
-            f"Registro: {patient.registro_fisio}\n\n"
-            f"{history_placeholder}\n\nDescrição: (Adicionar notas clínicas aqui)"
+            f"ID: {p.id}\n"
+            f"Nome: {p.nome}\n"
+            f"Data Nascimento: {p.data_nascimento}\n"
+            f"Idade: {p.idade}\n"
+            f"Sexo: {p.sexo}\n"
+            f"Condição: {p.condicao}\n"
+            f"Grau: {p.grau_comprometimento}\n"
+            f"Mão Comprometida: {p.mao_comprometida}\n"
+            f"Mão Dominante: {p.mao_dominante}\n"
+            f"Data Diagnóstico: {p.data_diagnostico}\n"
+            f"Terapeuta: {p.terapeuta}\n"
+            f"Registro Terapeuta: {p.registro_terapeuta}\n"
+            f"Contato: {p.contato}\n"
+            f"{sessions_text}"
+            f"{flybird_text}\n"
+            f"Observações:\n{p.observacoes}"
         )
         self.detail_info.setPlainText(info)
+    
+    def _load_flybird_results(self, patient_id: str) -> list:
+        """Carrega resultados do FlyBird de um paciente."""
+        import os
+        flybird_file = os.path.join("Pacientes", f"{patient_id}_flybird.csv")
+        if not os.path.exists(flybird_file):
+            return []
+        try:
+            with open(flybird_file, 'r', newline='', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                return list(reader)
+        except Exception:
+            return []
+    
+    def _edit_selected(self):
+        """Abre dialog de edição para o paciente selecionado."""
+        rows = self.table.selectionModel().selectedRows()
+        if not rows:
+            return
+        
+        row = rows[0].row()
+        if row < 0 or row >= len(self._patients_data):
+            return
+        
+        patient = self._patients_data[row]
+        dialog = EditPatientDialog(patient, load_therapists, self)
+        dialog.patient_updated.connect(self.refresh_data)
+        dialog.exec()
 
-class StartupOverlay(QWidget):
-    # Overlay mostrado ao iniciar para entrada rápida de paciente/fisioterapeuta (somente frontend).
-    def __init__(self, parent: QWidget, on_continue: Callable[[str,str,str,str],None]):
-        super().__init__(parent)
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setObjectName("StartupOverlay")
-        self.on_continue = on_continue
-        lay = QVBoxLayout(self); lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        card = QFrame(); card.setObjectName("SensorCard")
-        inner = QFormLayout(card); inner.setSpacing(12); inner.setContentsMargins(28,28,28,28)
-        self.ed_paciente = QLineEdit(); self.ed_paciente.setPlaceholderText("Nome do paciente")
-        self.ed_idade = QSpinBox(); self.ed_idade.setRange(1, 120); self.ed_idade.setValue(30)
-        self.cb_sexo = QComboBox(); self.cb_sexo.addItems(["F","M","Outro"]) 
-        self.ed_condicao = QLineEdit(); self.ed_condicao.setPlaceholderText("Condição / Observação")
-        self.ed_fisio = QLineEdit(); self.ed_fisio.setPlaceholderText("Fisioterapeuta")
-        self.ed_registro = QLineEdit(); self.ed_registro.setPlaceholderText("Registro Profissional")
-        inner.addRow("Paciente", self.ed_paciente)
-        inner.addRow("Idade", self.ed_idade)
-        inner.addRow("Sexo", self.cb_sexo)
-        inner.addRow("Condição", self.ed_condicao)
-        inner.addRow("Fisioterapeuta", self.ed_fisio)
-        inner.addRow("Registro", self.ed_registro)
-        btn = QPushButton("Continuar")
-        btn.clicked.connect(self._submit)
-        inner.addRow(btn)
-        lay.addWidget(card)
-    def _submit(self):
-        self.on_continue(
-            self.ed_paciente.text() or "Paciente Demo",
-            self.ed_fisio.text() or "Fisio Demo",
-            self.ed_condicao.text() or "--",
-            self.ed_registro.text() or "--"
+
+class TherapistsPage(QWidget):
+    """Página de terapeutas carregada a partir do CSV."""
+    def __init__(self):
+        super().__init__()
+        from PyQt6.QtWidgets import QHeaderView
+        lay = QVBoxLayout(self); lay.setSpacing(14)
+        
+        # Header
+        header = QHBoxLayout()
+        title = QLabel("Terapeutas"); title.setProperty("class","section-title")
+        self.btn_edit = QPushButton("✏️ Editar")
+        self.btn_edit.clicked.connect(self._edit_selected)
+        self.btn_edit.setEnabled(False)
+        self.btn_refresh = QPushButton("🔄 Atualizar")
+        self.btn_refresh.clicked.connect(self.refresh_data)
+        self.btn_add = QPushButton("➕ Novo Terapeuta")
+        self.btn_add.clicked.connect(self._add_therapist)
+        header.addWidget(title)
+        header.addStretch()
+        header.addWidget(self.btn_edit)
+        header.addWidget(self.btn_add)
+        header.addWidget(self.btn_refresh)
+        lay.addLayout(header)
+
+        # Busca
+        filter_bar = QHBoxLayout(); filter_bar.setSpacing(8)
+        self.search_edit = QLineEdit(); self.search_edit.setPlaceholderText("Pesquisar nome, registro, clínica...")
+        filter_bar.addWidget(QLabel("Buscar:")); filter_bar.addWidget(self.search_edit,1)
+        lay.addLayout(filter_bar)
+
+        # Tabela
+        self.table = QTableWidget()
+        self.table.setColumnCount(5)
+        self.table.setHorizontalHeaderLabels(["Registro", "Nome", "Telefone", "Email", "Clínica"])
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.table.setAlternatingRowColors(True)
+        self.table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QTableView.SelectionMode.SingleSelection)
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.itemSelectionChanged.connect(self._selection_changed)
+        lay.addWidget(self.table, 4)
+
+        # Painel de detalhes
+        self.detail_frame = QFrame(); self.detail_frame.setObjectName("SensorCard")
+        df_lay = QVBoxLayout(self.detail_frame); df_lay.setContentsMargins(16,16,16,16); df_lay.setSpacing(8)
+        self.detail_title = QLabel("Selecione um terapeuta"); self.detail_title.setProperty("class","sensor-label")
+        self.detail_info = QTextEdit(); self.detail_info.setReadOnly(True)
+        df_lay.addWidget(self.detail_title)
+        df_lay.addWidget(self.detail_info)
+        lay.addWidget(self.detail_frame, 2)
+
+        # Conexão filtro
+        self.search_edit.textChanged.connect(self._filter_table)
+        
+        # Armazena dados
+        self._therapists_data: List[Therapist] = []
+        
+        # Carrega dados
+        self.refresh_data()
+
+    def refresh_data(self):
+        """Recarrega dados dos terapeutas do CSV."""
+        self._therapists_data = load_therapists()
+        self._populate_table()
+    
+    def _populate_table(self):
+        """Popula tabela com os dados carregados."""
+        self.table.setRowCount(0)
+        for t in self._therapists_data:
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+            self.table.setItem(row, 0, QTableWidgetItem(t.registro))
+            self.table.setItem(row, 1, QTableWidgetItem(t.nome))
+            self.table.setItem(row, 2, QTableWidgetItem(t.telefone))
+            self.table.setItem(row, 3, QTableWidgetItem(t.email))
+            self.table.setItem(row, 4, QTableWidgetItem(t.clinica))
+    
+    def _filter_table(self, text: str):
+        """Filtra linhas da tabela."""
+        text_lower = text.lower()
+        for row in range(self.table.rowCount()):
+            match = False
+            for col in range(self.table.columnCount()):
+                item = self.table.item(row, col)
+                if item and text_lower in item.text().lower():
+                    match = True
+                    break
+            self.table.setRowHidden(row, not match if text else False)
+
+    def _selection_changed(self):
+        """Atualiza painel de detalhes."""
+        rows = self.table.selectionModel().selectedRows()
+        if not rows:
+            self.detail_title.setText("Selecione um terapeuta")
+            self.detail_info.setPlainText("")
+            self.btn_edit.setEnabled(False)
+            return
+        
+        row = rows[0].row()
+        if row < 0 or row >= len(self._therapists_data):
+            self.btn_edit.setEnabled(False)
+            return
+        
+        self.btn_edit.setEnabled(True)
+        t = self._therapists_data[row]
+        self.detail_title.setText(f"{t.nome} ({t.registro})")
+        
+        info = (
+            f"Registro: {t.registro}\n"
+            f"Nome: {t.nome}\n"
+            f"Telefone: {t.telefone}\n"
+            f"Email: {t.email}\n"
+            f"Clínica: {t.clinica}\n\n"
+            f"Observações:\n{t.observacoes}"
         )
-        self.hide()
+        self.detail_info.setPlainText(info)
+    
+    def _add_therapist(self):
+        """Abre dialog para adicionar terapeuta."""
+        # Encontra MainWindow pai para abrir overlay
+        parent = self.window()
+        if hasattr(parent, 'show_startup_overlay'):
+            parent.show_startup_overlay()
+    
+    def _edit_selected(self):
+        """Abre dialog de edição para o terapeuta selecionado."""
+        rows = self.table.selectionModel().selectedRows()
+        if not rows:
+            return
+        
+        row = rows[0].row()
+        if row < 0 or row >= len(self._therapists_data):
+            return
+        
+        therapist = self._therapists_data[row]
+        dialog = EditTherapistDialog(therapist, self)
+        dialog.therapist_updated.connect(self.refresh_data)
+        dialog.exec()
+
+# NOTA: StartupOverlay foi substituído por ClinicalOverlay em Modules/clinical_manager.py
+# A classe mantém compatibilidade como alias
+StartupOverlay = ClinicalOverlay
 
 class SettingsPage(QWidget):
     def __init__(self, on_theme_change: Callable[[str], None]):
@@ -2193,11 +2476,31 @@ class MainWindow(QMainWindow):
         self.btn_toggle.clicked.connect(self.toggle_sidebar)
         self.brand = QLabel("MarmSoft")
         self.session_badge = QLabel("Sessão: --"); self.session_badge.setProperty("class","badge")
+        
+        # Session Badge Widget (novo sistema de sessões clínicas)
+        self._active_clinical_session = None  # SessionData ativa
+        
         self.quick_theme = QComboBox(); self.quick_theme.addItems(["Dark","Light"]); self.quick_theme.currentTextChanged.connect(self.change_theme)
+        
+        # Botão Nova Sessão
+        self.btn_new_session = QPushButton("Nova Sessão")
+        self.btn_new_session.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_new_session.setToolTip("Iniciar nova sessão (encerra sessão atual se houver)")
+        self.btn_new_session.clicked.connect(self._on_new_session_clicked)
+        
+        # Botão Encerrar Sessão
+        self.btn_end_session = QPushButton("Encerrar Sessão")
+        self.btn_end_session.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_end_session.setToolTip("Encerrar sessão atual")
+        self.btn_end_session.clicked.connect(self._on_end_session_clicked)
+        self.btn_end_session.setEnabled(False)  # Desabilitado até ter sessão ativa
+        
         top_lay.addWidget(self.btn_toggle)
         top_lay.addWidget(self.brand)
         top_lay.addStretch()
         top_lay.addWidget(self.session_badge)
+        top_lay.addWidget(self.btn_new_session)
+        top_lay.addWidget(self.btn_end_session)
         top_lay.addWidget(QLabel("Tema:"))
         top_lay.addWidget(self.quick_theme)
         main_v.addWidget(self.top_bar)
@@ -2214,6 +2517,7 @@ class MainWindow(QMainWindow):
         nav_specs = [
             ("Dashboard", "🏠"),
             ("Pacientes", "👥"),
+            ("Terapeutas", "🩺"),
             ("Sensores", "🧪"),
             ("Calibração", "🛠"),
             ("Testes", "📊"),
@@ -2232,7 +2536,8 @@ class MainWindow(QMainWindow):
         # Stacked pages
         self.stack = QStackedWidget()
         self.page_dashboard = DashboardPage()
-        self.page_patients = PatientsPage(MOCK_PATIENTS)
+        self.page_patients = PatientsPage()
+        self.page_therapists = TherapistsPage()
         self.page_sensors = SensorsPage(self.sensors)
         self.page_calib = CalibrationPage(self.sensors, self.sensor_backend, self.latest_readings, lambda: self.current_theme)
         self.page_tests = TestsPage()
@@ -2242,7 +2547,7 @@ class MainWindow(QMainWindow):
         # Extensões dinâmicas (BLE + filtro) após construção da page_settings
         self._extend_settings_with_ble_and_filter()
         self.page_dev = DevPage()
-        for p in [self.page_dashboard,self.page_patients,self.page_sensors,self.page_calib,self.page_tests,self.page_games,self.page_history,self.page_settings,self.page_dev]:
+        for p in [self.page_dashboard,self.page_patients,self.page_therapists,self.page_sensors,self.page_calib,self.page_tests,self.page_games,self.page_history,self.page_settings,self.page_dev]:
             self.stack.addWidget(p)
         self.nav_list.currentRowChanged.connect(self.stack.setCurrentIndex)
 
@@ -2259,6 +2564,20 @@ class MainWindow(QMainWindow):
         try:
             from threading import Thread
             from FlyBird.main_fb import main_fb
+            
+            # Obtém dados do paciente da sessão ativa
+            player_name = None
+            patient_id = None
+            session_id = None
+            if hasattr(self, '_active_clinical_session') and self._active_clinical_session:
+                session = self._active_clinical_session
+                patient_id = session.patient_id
+                session_id = session.session_id
+                # Carrega nome do paciente
+                patient = load_patient(patient_id)
+                if patient:
+                    player_name = patient.nome
+            
             def run_game():
                 # Provedor de ângulo baseado no mapeamento e articulação escolhida no jogo
                 import json, os
@@ -2275,7 +2594,12 @@ class MainWindow(QMainWindow):
                     except Exception:
                         pass
                     return 0.0
-                main_fb(sensor_data_provider=get_angle)
+                main_fb(
+                    sensor_data_provider=get_angle,
+                    player_name=player_name,
+                    patient_id=patient_id,
+                    session_id=session_id
+                )
             Thread(target=run_game, daemon=True).start()
             self.page_dev.add_line("FlyBird iniciado")
         except Exception as e:
@@ -2508,7 +2832,7 @@ class MainWindow(QMainWindow):
             it = self.nav_list.item(i)
             original = it.data(Qt.ItemDataRole.UserRole) or ''
             mapping = {
-                'Dashboard':'🏠','Pacientes':'👥','Sensores':'🧪','Calibração':'🛠','Testes':'📊','Jogos':'🎮','Histórico':'🗂','Config':'⚙','Dev':'</>'
+                'Dashboard':'🏠','Pacientes':'👥','Terapeutas':'🩺','Sensores':'🧪','Calibração':'🛠','Testes':'📊','Jogos':'🎮','Histórico':'🗂','Config':'⚙','Dev':'</>'
             }
             glyph = mapping.get(original, '•')
             it.setIcon(self.make_icon(glyph))
@@ -2683,9 +3007,19 @@ class MainWindow(QMainWindow):
     def _open_sensor_mapping(self):
         try:
             from Modules.mapeamento_sensores import HandOverlayWindow
-            # Guarda referência para evitar GC
-            if not hasattr(self, '_mapping_win') or self._mapping_win is None:
-                self._mapping_win = HandOverlayWindow()
+            
+            # Obtém dados da sessão ativa
+            patient_id = None
+            session_id = None
+            if hasattr(self, '_active_clinical_session') and self._active_clinical_session:
+                session = self._active_clinical_session
+                patient_id = session.patient_id
+                session_id = session.session_id
+            
+            # Recria janela para atualizar dados da sessão
+            if hasattr(self, '_mapping_win') and self._mapping_win is not None:
+                self._mapping_win.close()
+            self._mapping_win = HandOverlayWindow(patient_id=patient_id, session_id=session_id)
             self._mapping_win.show()
             self._mapping_win.raise_(); self._mapping_win.activateWindow()
             self.page_dev.add_line("Janela de mapeamento aberta")
@@ -3013,7 +3347,7 @@ class MainWindow(QMainWindow):
             it = self.nav_list.item(i)
             label = it.data(Qt.ItemDataRole.UserRole) or ''
             mapping = {
-                'Dashboard':'🏠','Pacientes':'👥','Sensores':'🧪','Calibração':'🛠','Testes':'📊','Jogos':'🎮','Histórico':'🗂','Config':'⚙','Dev':'</>'
+                'Dashboard':'🏠','Pacientes':'👥','Terapeutas':'🩺','Sensores':'🧪','Calibração':'🛠','Testes':'📊','Jogos':'🎮','Histórico':'🗂','Config':'⚙','Dev':'</>'
             }
             it.setIcon(self.make_icon(mapping.get(label,'•')))
         self.apply_stylesheet()
@@ -3033,30 +3367,147 @@ class MainWindow(QMainWindow):
 
     # --------------- Startup Overlay Handling ---------------
     def show_startup_overlay(self):
-        self.overlay = StartupOverlay(self, self._overlay_continue)
+        """Exibe o overlay de gestão clínica (Novo Paciente, Abrir Paciente, Cadastrar Terapeuta)."""
+        self.overlay = ClinicalOverlay(self)
         self.overlay.setGeometry(self.rect())
+        
+        # Conecta sinais do overlay
+        self.overlay.session_started.connect(self._on_clinical_session_started)
+        self.overlay.therapists_changed.connect(self._on_therapists_changed)
+        self.overlay.closed.connect(self._on_overlay_closed)
+        
         self.overlay.show()
+    
+    def _on_clinical_session_started(self, patient_id: str, therapist_reg: str, therapist_nome: str):
+        """Callback quando uma sessão é iniciada via overlay clínico."""
+        # Carrega dados do paciente
+        patient = load_patient(patient_id)
+        patient_name = patient.nome if patient else patient_id
+        
+        # Cria sessão no sistema de persistência
+        session = open_session(patient_id, therapist_reg, therapist_nome)
+        
+        # Armazena sessão ativa
+        self._active_clinical_session = session
+        
+        # Log
+        self.page_dev.add_line(f"Sessão iniciada: {patient_name} / {therapist_nome}")
+        
+        # Atualiza status do dashboard com nome do paciente
+        self.page_dashboard.card_session.update_value(patient_name)
+        
+        # Atualiza badge e botões
+        self.session_badge.setText(f"Sessão: {patient_name}")
+        self.btn_end_session.setEnabled(True)
+        
+        # Inicia sessão interna do app
+        self.start_session()
+        
+        # Atualiza página de histórico
+        if hasattr(self, 'page_history'):
+            try:
+                self.page_history.refresh_data()
+            except Exception:
+                pass
+    
+    def _on_therapists_changed(self):
+        """Callback quando terapeutas são adicionados/atualizados."""
+        self.page_dev.add_line("Lista de terapeutas atualizada")
+        # Atualiza página de terapeutas
+        if hasattr(self, 'page_therapists'):
+            try:
+                self.page_therapists.refresh_data()
+            except Exception:
+                pass
+    
+    def _on_overlay_closed(self):
+        """Callback quando o overlay é fechado sem iniciar sessão."""
+        pass
+    
+    def _end_clinical_session(self, notes: str = ""):
+        """Encerra a sessão clínica ativa."""
+        if hasattr(self, '_active_clinical_session') and self._active_clinical_session:
+            session = close_session(self._active_clinical_session, notes)
+            self.page_dev.add_line(f"Sessão encerrada: {session.session_id} - Duração: {session.duracao}")
+            self._active_clinical_session = None
+            
+            # Atualiza dashboard
+            self.page_dashboard.card_session.update_value("INATIVA")
+            self.session_badge.setText("Sessão: --")
+            self.btn_end_session.setEnabled(False)
+            self.session = None
+            
+            # Atualiza página de pacientes se aberta
+            if hasattr(self, 'page_patients'):
+                try:
+                    self.page_patients.refresh_data()
+                except Exception:
+                    pass
+            
+            # Atualiza página de histórico
+            if hasattr(self, 'page_history'):
+                try:
+                    self.page_history.refresh_data()
+                except Exception:
+                    pass
+    
+    def _on_new_session_clicked(self):
+        """Callback quando usuário clica em Nova Sessão."""
+        # Se houver sessão ativa, encerra automaticamente
+        if hasattr(self, '_active_clinical_session') and self._active_clinical_session:
+            self._end_clinical_session("Sessão encerrada para iniciar nova")
+        
+        # Abre overlay de gestão clínica
+        self.show_startup_overlay()
+    
+    def _on_end_session_clicked(self):
+        """Callback quando usuário clica em Encerrar Sessão."""
+        if not hasattr(self, '_active_clinical_session') or not self._active_clinical_session:
+            return
+        
+        # Dialog para adicionar notas finais
+        from PyQt6.QtWidgets import QDialog, QDialogButtonBox
+        
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Encerrar Sessão")
+        dialog.setMinimumWidth(400)
+        
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(QLabel("Adicione notas finais da sessão (opcional):"))
+        
+        notes_edit = QTextEdit()
+        notes_edit.setPlaceholderText("Observações, progresso do paciente, próximos passos...")
+        notes_edit.setMaximumHeight(150)
+        layout.addWidget(notes_edit)
+        
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            notes = notes_edit.toPlainText().strip()
+            self._end_clinical_session(notes)
+    
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if hasattr(self, 'overlay') and self.overlay.isVisible():
             self.overlay.setGeometry(self.rect())
-    def _overlay_continue(self, paciente: str, fisio: str, cond: str, reg: str):
-        # Apenas log – não integra com resto ainda
-        self.page_dev.add_line(f"Sessão para {paciente} / {fisio} ({cond})")
-        # Poderia adicionar dinamicamente na lista de pacientes (mock)
-        new_id = f"P{len(MOCK_PATIENTS)+1:03d}"
-        MOCK_PATIENTS.append(Patient(new_id, paciente, 30, 'N', cond, fisio, reg))
-        # Atualiza tabela se página pacientes aberta
-        if hasattr(self, 'page_patients'):
-            self.page_patients.model.layoutAboutToBeChanged.emit()
-            self.page_patients.model.patients = MOCK_PATIENTS
-            self.page_patients.model.layoutChanged.emit()
-        self.start_session()
 
     def closeEvent(self, event):
         if QMessageBox.question(self, "Sair", "Deseja realmente sair?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No) == QMessageBox.StandardButton.No:
             event.ignore()
             return
+        
+        # Encerra sessão clínica ativa se houver
+        try:
+            if hasattr(self, '_active_clinical_session') and self._active_clinical_session:
+                self._end_clinical_session("Sessão encerrada ao fechar aplicação")
+        except Exception:
+            pass
+        
         # Tenta encerrar BLE e goniômetro de forma limpa
         try:
             self._shutdown_ble()

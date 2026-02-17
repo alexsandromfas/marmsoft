@@ -10,6 +10,15 @@ from .tests import *  # noqa: F401,F403
 from .fsr_calibrador import FSRCalibrador  # noqa: F401
 from .flex_calibrador import FlexCalibrador  # noqa: F401
 
+# Clinical Manager - Gestão de Pacientes, Terapeutas e Sessões
+from .clinical_manager import (  # noqa: F401
+    ClinicalOverlay, SessionBadge, SessionData,
+    PatientData, Therapist,
+    load_therapists, save_therapist, therapist_exists,
+    list_patients, load_patient, save_patient, patient_exists, delete_patient,
+    open_session, close_session, get_patient_sessions, has_active_session
+)
+
 # Removido: from .plot_manager import *
 # O antigo PlotManager (Tk) e versões intermediárias foram movidos para pasta legacy.
 # A versão atualmente usada na UI PyQt6 é importada diretamente onde necessária:

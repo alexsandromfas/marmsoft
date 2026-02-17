@@ -484,5 +484,32 @@
     "AmplitudeMax": 4.06,
     "Obstaculos": 2,
     "VelocidadeMax": 1.0
+  },
+  {
+    "Nome": "Pedro",
+    "Articulacao": "Proximal Indicador",
+    "AnguloFlexMax": 0.0,
+    "AnguloExtMin": 0.0,
+    "AmplitudeMax": 0.0,
+    "Obstaculos": 2,
+    "VelocidadeMax": 1.0
+  },
+  {
+    "Nome": "dsds",
+    "Articulacao": "Proximal Indicador",
+    "AnguloFlexMax": 234.02,
+    "AnguloExtMin": 0.0,
+    "AmplitudeMax": 234.02,
+    "Obstaculos": 1,
+    "VelocidadeMax": 1.0
+  },
+  {
+    "Nome": "Alex",
+    "Articulacao": "Proximal Indicador",
+    "AnguloFlexMax": 234.7,
+    "AnguloExtMin": 204.26,
+    "AmplitudeMax": 30.44,
+    "Obstaculos": 4,
+    "VelocidadeMax": 1.0
   }
 ]
