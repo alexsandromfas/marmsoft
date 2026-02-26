@@ -502,8 +502,17 @@ class Game:
 
     def play_again(self):
         """Start a new game using the same player."""
+        previous_finger = self.selected_finger  # Guarda o dedo anterior
         self.reset()
         self.screens.get_finger_choice()
+        if self.running:
+            # Verifica se o dedo mudou ou se o usuário escolheu recalibrar
+            if self.selected_finger != previous_finger:
+                # Dedo diferente - calibração obrigatória
+                self.screens.calibrate_range()
+            else:
+                # Mesmo dedo - oferece opção de recalibrar
+                self.screens.ask_recalibrate()
         if self.running:
             self.game_over = False  # Ensure game_over is reset
 

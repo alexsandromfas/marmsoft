@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import csv
 import os
+import sys
 import uuid
 import logging
 import tempfile
@@ -41,6 +42,21 @@ logger.setLevel(logging.DEBUG)
 _handler = logging.StreamHandler()
 _handler.setFormatter(logging.Formatter('[%(asctime)s] %(levelname)s - %(message)s'))
 logger.addHandler(_handler)
+
+
+# ===================== Funções de Caminho =====================
+
+def _get_base_dir() -> str:
+    """Retorna o diretório base correto tanto em desenvolvimento quanto no executável PyInstaller."""
+    if getattr(sys, 'frozen', False):
+        # Executável PyInstaller - usa o diretório do executável
+        return os.path.dirname(sys.executable)
+    else:
+        # Desenvolvimento - usa o diretório raiz do projeto
+        return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# Define diretório base
+BASE_DIR = _get_base_dir()
 
 
 # ===================== Dataclasses =====================
@@ -90,10 +106,10 @@ class SessionData:
 
 # ===================== Constantes =====================
 
-PATIENTS_DIR = "Pacientes"
-THERAPISTS_DIR = "Terapeutas"
+PATIENTS_DIR = os.path.join(BASE_DIR, "Pacientes")
+THERAPISTS_DIR = os.path.join(BASE_DIR, "Terapeutas")
 THERAPISTS_FILE = os.path.join(THERAPISTS_DIR, "therapists.csv")
-SESSIONS_FILE = "sessions.csv"
+SESSIONS_FILE = os.path.join(BASE_DIR, "sessions.csv")
 
 PATIENT_HEADER = [
     "id", "nome", "data_nascimento", "idade", "sexo", "condicao",
@@ -147,6 +163,23 @@ def _read_csv_rows(filepath: str) -> List[Dict[str, str]]:
     except Exception as e:
         logger.error(f"Falha ao ler {filepath}: {e}")
         return []
+
+
+def _write_csv_rows(filepath: str, rows: List[Dict[str, str]]) -> None:
+    """Escreve lista de dicionários de volta ao CSV de sessões."""
+    csv_rows = []
+    for row in rows:
+        csv_rows.append([
+            row.get("session_id", ""),
+            row.get("patient_id", ""),
+            row.get("therapist_registro", ""),
+            row.get("therapist_nome", ""),
+            row.get("start_time", ""),
+            row.get("end_time", ""),
+            row.get("duracao", ""),
+            row.get("notas", "")
+        ])
+    _atomic_write_csv(filepath, SESSION_HEADER, csv_rows)
 
 
 # --------- Terapeutas ---------
@@ -448,6 +481,92 @@ def has_active_session(patient_id: str) -> bool:
         if row.get("patient_id") == patient_id and not row.get("end_time"):
             return True
     return False
+
+
+def close_patient_active_session(patient_id: str) -> bool:
+    """
+    Fecha a sessão ativa de um paciente específico.
+    
+    Parameters
+    ----------
+    patient_id : str
+        ID do paciente
+    
+    Returns
+    -------
+    bool
+        True se uma sessão foi fechada, False caso contrário
+    """
+    rows = _read_csv_rows(SESSIONS_FILE)
+    session_closed = False
+    
+    for row in rows:
+        if row.get("patient_id") == patient_id and not row.get("end_time") and row.get("start_time"):
+            try:
+                start_time = row.get("start_time", "")
+                # Calcula um end_time atual
+                end_dt = datetime.now()
+                start_dt = datetime.fromisoformat(start_time)
+                
+                # Calcula duração
+                delta = end_dt - start_dt
+                hours, remainder = divmod(int(delta.total_seconds()), 3600)
+                minutes, seconds = divmod(remainder, 60)
+                duracao = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+                
+                row["end_time"] = end_dt.isoformat()
+                row["duracao"] = duracao
+                row["notas"] = "Sessão encerrada manualmente (sessão anterior não fechada)"
+                session_closed = True
+                logger.info(f"Sessão ativa fechada: patient_id={patient_id}, session_id={row.get('session_id')}, duracao={duracao}")
+                break
+            except Exception as e:
+                logger.warning(f"Erro ao fechar sessão ativa do paciente {patient_id}: {e}")
+                continue
+    
+    if session_closed:
+        _write_csv_rows(SESSIONS_FILE, rows)
+    
+    return session_closed
+
+
+def close_orphaned_sessions() -> int:
+    """
+    Fecha automaticamente todas as sessões abertas (sem end_time).
+    Útil para limpar sessões que ficaram abertas por fechamento inesperado.
+    
+    Returns
+    -------
+    int
+        Número de sessões fechadas
+    """
+    rows = _read_csv_rows(SESSIONS_FILE)
+    closed_count = 0
+    
+    for row in rows:
+        if not row.get("end_time") and row.get("start_time"):
+            # Esta sessão está aberta, vamos fechá-la
+            try:
+                start_time = row.get("start_time", "")
+                # Calcula um end_time 1 segundo após o start
+                start_dt = datetime.fromisoformat(start_time)
+                end_dt = start_dt.replace(second=start_dt.second + 1)
+                
+                row["end_time"] = end_dt.isoformat()
+                row["duracao"] = "00:00:01"
+                row["notas"] = "Sessão encerrada automaticamente ao iniciar aplicação"
+                closed_count += 1
+                logger.info(f"Sessão órfã fechada: patient_id={row.get('patient_id')}, session_id={row.get('session_id')}")
+            except Exception as e:
+                logger.warning(f"Erro ao fechar sessão órfã: {e}")
+                continue
+    
+    if closed_count > 0:
+        # Salva o arquivo atualizado
+        _write_csv_rows(SESSIONS_FILE, rows)
+        logger.info(f"Total de {closed_count} sessão(ões) órfã(s) fechada(s)")
+    
+    return closed_count
 
 
 def load_recent_sessions(limit: int = 20) -> List[SessionData]:
@@ -958,7 +1077,50 @@ class OpenPatientForm(QWidget):
         
         # Verificar sessão ativa
         if has_active_session(self._current_patient.id):
-            self.feedback.show_warning("Este paciente já possui uma sessão ativa!")
+            from PyQt6.QtWidgets import QMessageBox
+            msg = QMessageBox(self)
+            msg.setIcon(QMessageBox.Icon.Warning)
+            msg.setWindowTitle("Sessão Ativa")
+            msg.setText("Este paciente já possui uma sessão ativa!")
+            msg.setInformativeText(
+                "Isso pode ter acontecido porque o aplicativo foi fechado sem encerrar a sessão anterior.\n\n"
+                "Você pode encerrar a sessão anterior e criar uma nova."
+            )
+            
+            # Adiciona botões customizados
+            btn_close_old = msg.addButton("Encerrar Sessão Antiga", QMessageBox.ButtonRole.AcceptRole)
+            btn_cancel = msg.addButton("Cancelar", QMessageBox.ButtonRole.RejectRole)
+            msg.setDefaultButton(btn_close_old)
+            
+            msg.exec()
+            
+            # Verifica qual botão foi clicado
+            clicked = msg.clickedButton()
+            if clicked == btn_close_old:
+                # Encerra a sessão antiga
+                try:
+                    success = close_patient_active_session(self._current_patient.id)
+                    if success:
+                        self.feedback.show_success("Sessão anterior encerrada com sucesso!")
+                    else:
+                        self.feedback.show_error("Erro ao encerrar sessão anterior")
+                        return
+                except Exception as e:
+                    logger.error(f"Erro ao encerrar sessão antiga: {e}")
+                    self.feedback.show_error(f"Erro: {e}")
+                    return
+            elif clicked == btn_cancel:
+                # Usuário clicou em Cancelar
+                return
+            else:
+                # Fechou a janela sem clicar em nenhum botão
+                return
+        
+        self._start_new_session_after_close()
+    
+    def _start_new_session_after_close(self):
+        """Inicia uma nova sessão após verificações."""
+        if not self._current_patient:
             return
         
         terapeuta_reg = self.cb_edit_terapeuta.currentData() or ""

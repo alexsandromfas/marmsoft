@@ -11,6 +11,18 @@ from PyQt6.QtWidgets import (
 )
 
 
+def _get_base_dir() -> str:
+    """Retorna diretório base do projeto, compatível com PyInstaller."""
+    if getattr(sys, 'frozen', False):
+        # Executável congelado pelo PyInstaller
+        return os.path.dirname(sys.executable)
+    else:
+        # Modo de desenvolvimento
+        return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+BASE_DIR = _get_base_dir()
+
+
 DARK_THEME = {
     'bg': '#0e1116', 'top': 'rgba(20,24,30,0.85)', 'top_border': '#1f242b',
     'side_bg':'#161a21','side_border':'#232a33','side_item':'#b6c3cf','side_hover':'#212a33',
@@ -371,7 +383,7 @@ class HandOverlayWindow(QMainWindow):
 
     # ---------- Config (carregar/salvar) ----------
     def _config_path(self) -> str:
-        return os.path.join(os.getcwd(), 'config.json')
+        return os.path.join(BASE_DIR, 'config.json')
 
     def _load_config_mapping(self):
         try:

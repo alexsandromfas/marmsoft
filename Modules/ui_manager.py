@@ -45,6 +45,19 @@ from Modules.clinical_manager import (
 )
 
 
+# ------------------ Funções de Caminho ------------------
+def _get_base_dir() -> str:
+    """Retorna o diretório base correto tanto em desenvolvimento quanto no executável PyInstaller."""
+    if getattr(sys, 'frozen', False):
+        # Executável PyInstaller - usa o diretório do executável
+        return os.path.dirname(sys.executable)
+    else:
+        # Desenvolvimento - usa o diretório raiz do projeto
+        return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+BASE_DIR = _get_base_dir()
+
+
 # ------------------ Dataclasses ------------------
 @dataclass
 class SensorState:
@@ -1040,8 +1053,8 @@ class CalibrationPage(QWidget):
         # Salva via FlexCalibrador (delegando persistência)
         import os
         from Modules.flex_calibrador import FlexCalibrador
-        os.makedirs('calibrations/flex', exist_ok=True)
-        path = f"calibrations/flex/calibration_{sel}.csv"
+        os.makedirs(os.path.join(BASE_DIR, 'calibrations', 'flex'), exist_ok=True)
+        path = os.path.join(BASE_DIR, 'calibrations', 'flex', f'calibration_{sel}.csv')
         try:
             FlexCalibrador().salvar_pontos_csv(path, ordered)
         except Exception as _e:
@@ -1181,7 +1194,7 @@ class CalibrationPage(QWidget):
 
     def _read_flex_calibration_points(self, sensor: str):
         import os, csv
-        path = os.path.join('calibrations','flex', f'calibration_{sensor}.csv')
+        path = os.path.join(BASE_DIR, 'calibrations','flex', f'calibration_{sensor}.csv')
         xs, ys = [], []
         if not os.path.isfile(path):
             return xs, ys
@@ -1205,7 +1218,7 @@ class CalibrationPage(QWidget):
     def _read_fsr_calibration_points(self, sensor: str):
         # Lê pares (tensão, força) do CSV salvo em calibrations/fsr/calibration_<sensor>.csv
         import os, csv
-        out_dir = os.path.join('calibrations', 'fsr')
+        out_dir = os.path.join(BASE_DIR, 'calibrations', 'fsr')
         path = os.path.join(out_dir, f'calibration_{sensor}.csv')
         xs, ys = [], []
         if not os.path.isfile(path):
@@ -1241,7 +1254,7 @@ class CalibrationPage(QWidget):
         # Fallback: tentar ler do CSV via FlexCalibrador (ajuste pelos pontos)
         try:
             from Modules.flex_calibrador import FlexCalibrador
-            path = os.path.join('calibrations','flex', f'calibration_{sensor}.csv')
+            path = os.path.join(BASE_DIR, 'calibrations','flex', f'calibration_{sensor}.csv')
             return FlexCalibrador().carregar_de_csv(path)
         except Exception:
             return None
@@ -1258,7 +1271,7 @@ class CalibrationPage(QWidget):
         # Fallback: carregar de CSV combinado via FSRCalibrador
         try:
             from Modules.fsr_calibrador import FSRCalibrador
-            path = os.path.join('calibrations','fsr', f'calibration_{sensor}.csv')
+            path = os.path.join(BASE_DIR, 'calibrations','fsr', f'calibration_{sensor}.csv')
             return FSRCalibrador().carregar_calibracao_csv(path)
         except Exception:
             return None
@@ -1306,7 +1319,7 @@ class CalibrationPage(QWidget):
         try:
             import os, csv as _csv
             # Novo padrão de caminho: calibrations/fsr/calibration_<sensor>.csv
-            path = os.path.join('calibrations','fsr', f'calibration_{sel}.csv')
+            path = os.path.join(BASE_DIR, 'calibrations','fsr', f'calibration_{sel}.csv')
             if os.path.isfile(path):
                 with open(path, 'r', newline='', encoding='utf-8') as _f:
                     rd = _csv.reader(_f)
@@ -1407,11 +1420,11 @@ class CalibrationPage(QWidget):
         # Salvar em data_tests
         try:
             import os, csv
-            os.makedirs('data_tests', exist_ok=True)
+            os.makedirs(os.path.join(BASE_DIR, 'data_tests'), exist_ok=True)
             sel = self.combo_sensor.currentText() or 'flex'
             ts = int(time.time())
             fname = f"test_{sel}_{ts}.csv"
-            path = os.path.join('data_tests', fname)
+            path = os.path.join(BASE_DIR, 'data_tests', fname)
             with open(path, 'w', newline='') as f:
                 w = csv.writer(f)
                 w.writerow(['time','flex_angle','goniometer_angle'])
@@ -1431,11 +1444,11 @@ class CalibrationPage(QWidget):
         # Salvar CSV
         try:
             import os, csv
-            os.makedirs('data_tests', exist_ok=True)
+            os.makedirs(os.path.join(BASE_DIR, 'data_tests'), exist_ok=True)
             sel = self.combo_sensor.currentText() or 'fsr'
             ts = int(time.time())
             fname = f"test_{sel}_{ts}.csv"
-            path = os.path.join('data_tests', fname)
+            path = os.path.join(BASE_DIR, 'data_tests', fname)
             with open(path, 'w', newline='', encoding='utf-8') as f:
                 w = csv.writer(f)
                 w.writerow(['time','fsr_force'])
@@ -1633,8 +1646,8 @@ class CalibrationPage(QWidget):
         if model_key == 'rational_q' and model_used != 'rational_q':
             QMessageBox.information(self, 'Curva Racional Indisponível', 'SciPy não disponível; usando polinomial de 2º grau.')
         # Salvar calibração
-        os.makedirs(os.path.join('calibrations','fsr'), exist_ok=True)
-        path = os.path.join('calibrations','fsr', f'calibration_{sel}.csv')
+        os.makedirs(os.path.join(BASE_DIR, 'calibrations','fsr'), exist_ok=True)
+        path = os.path.join(BASE_DIR, 'calibrations','fsr', f'calibration_{sel}.csv')
         try:
             # Ordem correta: (caminho_csv, tensoes, forcas, model, coefs)
             cal.salvar_calibracao(path, tensoes, forcas, model_used, coefs)
@@ -2590,10 +2603,14 @@ class MainWindow(QMainWindow):
                         mapping = cfg.get('sensorMapping', {})
                         sensor = mapping.get(art)
                         if sensor and sensor != 'Nenhum':
+                            # Verifica se o sensor está calibrado
+                            if sensor in self.sensor_backend:
+                                if self.sensor_backend[sensor].calibration_function is None:
+                                    return None  # Não calibrado
                             return self.latest_readings.get(f'{sensor}_angle', 0.0)
                     except Exception:
                         pass
-                    return 0.0
+                    return None  # Retorna None se não houver sensor válido
                 main_fb(
                     sensor_data_provider=get_angle,
                     player_name=player_name,
@@ -2650,6 +2667,15 @@ class MainWindow(QMainWindow):
             self.page_dev.add_line(f"Erro ao iniciar Car Racing: {e}")
 
     def _post_setup(self):
+        # Fecha sessões órfãs (que ficaram abertas de execuções anteriores)
+        try:
+            from Modules.clinical_manager import close_orphaned_sessions
+            closed = close_orphaned_sessions()
+            if closed > 0:
+                self.page_dev.add_line(f"[SESSÕES] {closed} sessão(ões) órfã(s) fechada(s) automaticamente")
+        except Exception as e:
+            print(f"[ERRO] Falha ao fechar sessões órfãs: {e}")
+            
         # Seleciona página inicial
         self.nav_list.setCurrentRow(0)
 
@@ -3038,16 +3064,47 @@ class MainWindow(QMainWindow):
 
     class _BleScanWorker(QObject):
         finished = pyqtSignal(list)
+        error = pyqtSignal(str)
         def run(self):
             import asyncio
+            import sys
+            import logging
+            
+            logger = logging.getLogger('BLE_SCAN')
+            logger.info("=== INICIANDO SCAN BLE ===")
+            logger.info(f"Python: {sys.version}")
+            logger.info(f"Platform: {sys.platform}")
+            logger.info(f"Frozen: {getattr(sys, 'frozen', False)}")
+            
             try:
+                logger.info("Importando BleakScanner...")
                 from bleak import BleakScanner
-                loop = asyncio.new_event_loop(); asyncio.set_event_loop(loop)
-                devices = loop.run_until_complete(BleakScanner.discover())
+                logger.info("BleakScanner importado com sucesso")
+                
+                logger.info("Criando novo event loop...")
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                logger.info("Event loop criado")
+                
+                logger.info("Iniciando descoberta BLE (timeout=10s)...")
+                devices = loop.run_until_complete(BleakScanner.discover(timeout=10.0))
+                logger.info(f"Scan concluído! Encontrados {len(devices)} dispositivos")
+                
+                for i, dev in enumerate(devices):
+                    logger.info(f"  [{i}] {dev.name or 'Unknown'} - {dev.address}")
+                
                 loop.close()
-            except Exception:
-                devices = []
-            self.finished.emit(devices)
+                logger.info("Event loop fechado")
+                
+                self.finished.emit(devices)
+                logger.info("Signal 'finished' emitido")
+                
+            except Exception as e:
+                error_msg = f"Erro no scan BLE: {type(e).__name__}: {str(e)}"
+                logger.error(error_msg)
+                logger.error(f"Traceback:", exc_info=True)
+                self.error.emit(error_msg)
+                self.finished.emit([])
 
     def _ble_scan(self):
         # Worker em QThread para varredura BLE
@@ -3059,7 +3116,18 @@ class MainWindow(QMainWindow):
         self._ble_scan_thread.started.connect(self._ble_scan_worker.run)
         self._ble_scan_worker.finished.connect(self._ble_scan_thread.quit)
         self._ble_scan_worker.finished.connect(self._populate_ble_devices)
+        self._ble_scan_worker.error.connect(self._ble_scan_error)
         self._ble_scan_thread.start()
+    
+    def _ble_scan_error(self, error_msg: str):
+        """Mostra erro de scan BLE para o usuário."""
+        self.page_dev.add_line(f"ERRO: {error_msg}")
+        QMessageBox.warning(self, "Erro Bluetooth", 
+            f"Falha ao buscar dispositivos Bluetooth:\n\n{error_msg}\n\n"
+            "Verifique se:\n"
+            "• O Bluetooth está ligado\n"
+            "• O aplicativo tem permissão para usar Bluetooth\n"
+            "• Você está executando como Administrador (se necessário)")
 
     def _populate_ble_devices(self, devices: list):
         self._ble_device_list = devices

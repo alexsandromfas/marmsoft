@@ -1,7 +1,7 @@
 """Helper screens for menu prompts and game over display."""
 
 import pygame
-import os, json
+import os, json, sys
 from FlyBird.modules.settings import *
 from FlyBird.modules.utils import *
 
@@ -275,7 +275,11 @@ class Screens:
         # Helpers
         import os, json
         def repo_root():
-            return os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+            """Retorna diretório raiz do projeto, compatível com PyInstaller."""
+            if getattr(sys, 'frozen', False):
+                return os.path.dirname(sys.executable)
+            else:
+                return os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
         def mao_dir():
             # Prefer assets/Mao
             p = os.path.join(repo_root(), 'assets', 'Mao')
@@ -524,7 +528,12 @@ class Screens:
 
             # Live angle reading
             current_val = self.game.sensor_data_provider() if self.game.sensor_data_provider else None
-            angle_text = font_small.render(f"Ângulo atual: {current_val:.2f}°" if isinstance(current_val, (int,float)) else "Ângulo atual: --", True, WHITE)
+            if current_val is None:
+                angle_text = font_small.render("Ângulo Atual: (é necessário calibrar este sensor)", True, WHITE)
+            elif isinstance(current_val, (int, float)):
+                angle_text = font_small.render(f"Ângulo atual: {current_val:.2f}°", True, WHITE)
+            else:
+                angle_text = font_small.render("Ângulo atual: --", True, WHITE)
             self.screen.blit(angle_text, (margin, HEIGHT//2 - BTN_H - 60))
 
             # Buttons
@@ -550,3 +559,50 @@ class Screens:
             pygame.display.flip()
             self.clock.tick(60)
 
+    def ask_recalibrate(self):
+        """Pergunta se o usuário deseja recalibrar os limites quando usando o mesmo dedo."""
+        font_title = pygame.font.Font(None, 48)
+        font_small = pygame.font.Font(None, 32)
+        title = font_title.render("Mesma Articulação", True, WHITE)
+        info = font_small.render("Você está usando a mesma articulação.", True, WHITE)
+        info2 = font_small.render("Deseja refazer a calibração de amplitude?", True, WHITE)
+
+        # Buttons
+        BTN_W, BTN_H = 200, 50
+        margin = 40
+        yes_btn = pygame.Rect(WIDTH//2 - BTN_W - margin, HEIGHT//2 + 40, BTN_W, BTN_H)
+        no_btn = pygame.Rect(WIDTH//2 + margin, HEIGHT//2 + 40, BTN_W, BTN_H)
+
+        running = True
+        while running:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    self.game.running = False
+                    return
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    mx, my = event.pos
+                    if yes_btn.collidepoint((mx, my)):
+                        # Refazer calibração
+                        self.calibrate_range()
+                        return
+                    elif no_btn.collidepoint((mx, my)):
+                        # Manter calibração anterior
+                        return
+
+            # Draw screen
+            self.screen.fill(BLACK)
+            self.screen.blit(title, (WIDTH//2 - title.get_width()//2, HEIGHT//3))
+            self.screen.blit(info, (WIDTH//2 - info.get_width()//2, HEIGHT//3 + 60))
+            self.screen.blit(info2, (WIDTH//2 - info2.get_width()//2, HEIGHT//3 + 95))
+
+            # Buttons
+            pygame.draw.rect(self.screen, (100, 200, 100), yes_btn)  # Verde
+            yes_text = font_small.render("Sim, Recalibrar", True, BLACK)
+            self.screen.blit(yes_text, yes_text.get_rect(center=yes_btn.center))
+
+            pygame.draw.rect(self.screen, (200, 200, 200), no_btn)  # Cinza
+            no_text = font_small.render("Não, Continuar", True, BLACK)
+            self.screen.blit(no_text, no_text.get_rect(center=no_btn.center))
+
+            pygame.display.flip()
+            self.clock.tick(60)

@@ -1,6 +1,7 @@
 """Global constants used throughout the FlyBird game."""
 
 import os
+import sys
 
 # Screen settings
 WIDTH, HEIGHT = 960, 640
@@ -11,7 +12,18 @@ WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
 
 # Paths
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+def _get_base_dir():
+    """Retorna diretório base do FlyBird, compatível com PyInstaller."""
+    if getattr(sys, 'frozen', False):
+        # Executável congelado pelo PyInstaller
+        # PyInstaller coloca os dados em _MEIPASS (pasta _internal)
+        meipass = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
+        return os.path.join(meipass, 'FlyBird')
+    else:
+        # Modo de desenvolvimento
+        return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+BASE_DIR = _get_base_dir()
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 NUVENS_DIR = os.path.join(ASSETS_DIR, "Nuvens")
 BIRD_DIR = os.path.join(ASSETS_DIR, "Bird")
